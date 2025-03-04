@@ -132,101 +132,101 @@ func TestManyElections3A(t *testing.T) {
 }
 
 func TestBasicAgree3B(t *testing.T) {
-	// servers := 3
-	// ts := makeTest(t, servers, true, false)
-	// defer ts.cleanup()
+	servers := 3
+	ts := makeTest(t, servers, true, false)
+	defer ts.cleanup()
 
-	// tester.AnnotateTest("TestBasicAgree3B", servers)
-	// ts.Begin("Test (3B): basic agreement")
+	tester.AnnotateTest("TestBasicAgree3B", servers)
+	ts.Begin("Test (3B): basic agreement")
 
-	// iters := 3
-	// for index := 1; index < iters+1; index++ {
-	// 	nd, _ := ts.nCommitted(index)
-	// 	if nd > 0 {
-	// 		t.Fatalf("some have committed before Start()")
-	// 	}
+	iters := 3
+	for index := 1; index < iters+1; index++ {
+		nd, _ := ts.nCommitted(index)
+		if nd > 0 {
+			t.Fatalf("some have committed before Start()")
+		}
 
-	// 	xindex := ts.one(index*100, servers, false)
-	// 	if xindex != index {
-	// 		t.Fatalf("got index %v but expected %v", xindex, index)
-	// 	}
-	// }
+		xindex := ts.one(index*100, servers, false)
+		if xindex != index {
+			t.Fatalf("got index %v but expected %v", xindex, index)
+		}
+	}
 }
 
 // check, based on counting bytes of RPCs, that
 // each command is sent to each peer just once.
 func TestRPCBytes3B(t *testing.T) {
-	// servers := 3
-	// ts := makeTest(t, servers, true, false)
-	// defer ts.cleanup()
+	servers := 3
+	ts := makeTest(t, servers, true, false)
+	defer ts.cleanup()
 
-	// tester.AnnotateTest("TestRPCBytes3B", servers)
-	// ts.Begin("Test (3B): RPC byte count")
+	tester.AnnotateTest("TestRPCBytes3B", servers)
+	ts.Begin("Test (3B): RPC byte count")
 
-	// ts.one(99, servers, false)
-	// bytes0 := ts.BytesTotal()
+	ts.one(99, servers, false)
+	bytes0 := ts.BytesTotal()
 
-	// iters := 10
-	// var sent int64 = 0
-	// for index := 2; index < iters+2; index++ {
-	// 	cmd := tester.Randstring(5000)
-	// 	xindex := ts.one(cmd, servers, false)
-	// 	if xindex != index {
-	// 		t.Fatalf("got index %v but expected %v", xindex, index)
-	// 	}
-	// 	sent += int64(len(cmd))
-	// }
+	iters := 10
+	var sent int64 = 0
+	for index := 2; index < iters+2; index++ {
+		cmd := tester.Randstring(5000)
+		xindex := ts.one(cmd, servers, false)
+		if xindex != index {
+			t.Fatalf("got index %v but expected %v", xindex, index)
+		}
+		sent += int64(len(cmd))
+	}
 
-	// bytes1 := ts.BytesTotal()
-	// got := bytes1 - bytes0
-	// expected := int64(servers) * sent
-	// if got > expected+50000 {
-	// 	t.Fatalf("too many RPC bytes; got %v, expected %v", got, expected)
-	// }
+	bytes1 := ts.BytesTotal()
+	got := bytes1 - bytes0
+	expected := int64(servers) * sent
+	if got > expected+50000 {
+		t.Fatalf("too many RPC bytes; got %v, expected %v", got, expected)
+	}
 
 }
 
 // test just failure of followers.
 func TestFollowerFailure3B(t *testing.T) {
-	// servers := 3
-	// ts := makeTest(t, servers, true, false)
-	// defer ts.cleanup()
+	servers := 3
+	ts := makeTest(t, servers, true, false)
+	defer ts.cleanup()
 
-	// tester.AnnotateTest("TestFollowerFailure3B", servers)
-	// ts.Begin("Test (3B): test progressive failure of followers")
+	tester.AnnotateTest("TestFollowerFailure3B", servers)
+	ts.Begin("Test (3B): test progressive failure of followers")
 
-	// ts.one(101, servers, false)
+	ts.one(101, servers, false)
 
-	// // disconnect one follower from the network.
-	// leader1 := ts.checkOneLeader()
-	// ts.g.DisconnectAll((leader1 + 1) % servers)
-	// tester.AnnotateConnection(ts.g.GetConnected())
+	// disconnect one follower from the network.
+	leader1 := ts.checkOneLeader()
+	ts.g.DisconnectAll((leader1 + 1) % servers)
+	tester.AnnotateConnection(ts.g.GetConnected())
 
-	// // the leader and remaining follower should be
-	// // able to agree despite the disconnected follower.
-	// ts.one(102, servers-1, false)
-	// time.Sleep(RaftElectionTimeout)
-	// ts.one(103, servers-1, false)
+	// the leader and remaining follower should be
+	// able to agree despite the disconnected follower.
+	ts.one(102, servers-1, false)
+	time.Sleep(RaftElectionTimeout)
+	ts.one(103, servers-1, false)
 
-	// // disconnect the remaining follower
-	// leader2 := ts.checkOneLeader()
-	// ts.g.DisconnectAll((leader2 + 1) % servers)
-	// ts.g.DisconnectAll((leader2 + 2) % servers)
-	// tester.AnnotateConnection(ts.g.GetConnected())
+	// disconnect the remaining follower
+	leader2 := ts.checkOneLeader()
+	ts.g.DisconnectAll((leader2 + 1) % servers)
+	ts.g.DisconnectAll((leader2 + 2) % servers)
+	tester.AnnotateConnection(ts.g.GetConnected())
 
-	// // submit a command.
-	// index, _, ok := ts.srvs[leader2].Raft().Start(104)
-	// if ok != true {
-	// 	t.Fatalf("leader rejected Start()")
-	// }
-	// if index != 4 {
-	// 	t.Fatalf("expected index 4, got %v", index)
-	// }
+	// submit a command.
+	index, _, ok := ts.srvs[leader2].Raft().Start(104)
+	if ok != true {
+		t.Fatalf("leader rejected Start()")
+	}
+	if index != 4 {
+		t.Fatalf("expected index 4, got %v", index)
+	}
 
-	// time.Sleep(2 * RaftElectionTimeout)
+	time.Sleep(2 * RaftElectionTimeout)
 
-	// // check that command 104 did not commit.
-	// ts.checkNoAgreement(index)
+	// check that command 104 did not commit.
+	ts.checkNoAgreement(index)
 }
 
 // test just failure of leaders.

@@ -153,8 +153,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 func (rf *Raft) startElection() {
 	// Staggered election start times
-	ms := (rand.Int63() % 50) // 20 ms
-	time.Sleep(time.Duration(ms) * time.Millisecond)
+	// ms := (rand.Int63() % 50) // 20 ms
+	// time.Sleep(time.Duration(ms) * time.Millisecond)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -171,11 +171,7 @@ func (rf *Raft) startElection() {
 
 	// get last element from logs arrays
 	args.LastLogIndex = len(rf.logEntries) - 1
-	if args.LastLogIndex >= 0 {
-		args.LastLogTerm = rf.logTermsReceived[len(rf.logTermsReceived)-1]
-	} else {
-		args.LastLogTerm = 0
-	}
+	args.LastLogTerm = rf.logTermsReceived[len(rf.logTermsReceived)-1]
 
 	for index, _ := range rf.peers {
 		if index != rf.me {
@@ -187,7 +183,7 @@ func (rf *Raft) startElection() {
 }
 
 func (rf *Raft) resetHeartbeatTimer() { // jellyfish
-	ms := 150 + (rand.Int63() % 300)
+	ms := 500 + (rand.Int63() % 300)
 	now := time.Now()
 	candidateTimer := now.Add(time.Duration(ms) * time.Millisecond)
 
@@ -210,10 +206,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if rf.votedFor == -1 {
 			// Check if the log is up to date
 			myLastLogIndex := len(rf.logEntries) - 1
-			myLastLogTerm := 0
-			if args.LastLogIndex >= 0 {
-				myLastLogTerm = rf.logTermsReceived[len(rf.logTermsReceived)-1]
-			}
+			myLastLogTerm := rf.logTermsReceived[len(rf.logTermsReceived)-1]
+
+			LogDebugf("%d: %d in term %d\t%d: %d in term %d\n", rf.me,myLastLogIndex,myLastLogTerm,args.CandidateIndex,args.LastLogIndex, args.LastLogTerm)
+
 			if args.LastLogIndex >= myLastLogIndex && args.LastLogTerm >= myLastLogTerm {
 				// Then grant the vote
 				reply.VoteGranted = true
@@ -278,12 +274,14 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			
 			for i:=0;i<len(rf.peers);i++ {
 				if i != rf.me {
-					rf.nextIndex[i] = max(len(rf.logEntries)-1, 1)
+					rf.nextIndex[i] = max(len(rf.logEntries), 1)
 					rf.matchIndex[i] = 0
 				}
 			}
 		}
 		// LogDebugf("\t%d received vote", rf.me)
+	} else if reply.Term > rf.currentTerm {
+		rf.currentTerm = reply.Term
 	}
 	return ok
 }
@@ -380,11 +378,34 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
+func (rf *Raft) applyCommands() {
+	lastApplied := 0
+
+	for !rf.killed() {
+		time.Sleep(30 * time.Millisecond)
+
+		rf.mu.Lock()
+		
+		if rf.commitIndex > lastApplied {
+			lastApplied += 1
+
+			// LogDebugf("\t\t\t%d applying %d\n", rf.me, lastApplied)
+			
+			applyMsg := raftapi.ApplyMsg{}
+			applyMsg.CommandValid = true 
+			applyMsg.Command = rf.logEntries[lastApplied]
+			applyMsg.CommandIndex = lastApplied
+			rf.mu.Unlock()
+			rf.applyCh <- applyMsg
+		} else {
+			rf.mu.Unlock()
+		}
+	}
+}
+
 func (rf *Raft) ticker() {
 	for !rf.killed() {
 		time.Sleep(10 * time.Millisecond) // always sleep
-		// set a "timer" with heartbeated as a specific value
-		// Pause for a random amount of time between 50 and 350ms
 
 		rf.mu.Lock()
 
@@ -401,9 +422,12 @@ func (rf *Raft) ticker() {
 	}
 }
 
+// receiveappend
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	isHeartbeat := len(args.LogEntries) == 0
 
 	// if len(args.LogEntries) != 0 {
 	// 	LogDebugf("\t%d received APPEND at index %d from %d\n", rf.me, args.PrevLogIndex+1, args.LeaderId)
@@ -417,14 +441,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	} // Assume args.Term >= rf.currentTerm below this line
 
-	// Update heartbeat
 	rf.resetHeartbeatTimer()
 
-	if rf.commitIndex < args.LeaderCommit {
-		rf.commitIndex = args.LeaderCommit
-		LogDebugf("%d's commit index is now %d\n", rf.me, rf.commitIndex)
-
-		go rf.sendApplyMsg(rf.commitIndex)
+	if rf.commitIndex < args.LeaderCommit && isHeartbeat {
+		rf.commitIndex = min(args.LeaderCommit, len(rf.logEntries)-1)
+		if rf.commitIndex == args.LeaderCommit {
+			LogDebugf("%d's commit index is now %d yay\n", rf.me, rf.commitIndex)
+		}
 	}
 
 	// Demote self if it believed it was the leader
@@ -435,7 +458,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	// if it was a heartbeat, just return now :p
-	if len(args.LogEntries) == 0 {
+	if isHeartbeat {
 		// LogDebugf("\t%d received heartbeat from %d\n", rf.me, args.LeaderId)
 		return
 	}
@@ -443,8 +466,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Check if log contains a matching entry at args.PrevLogIndex
 	// If given index is 3, need at least an array of length 4 to acommodate
 	if len(rf.logEntries) <= args.PrevLogIndex || rf.logTermsReceived[args.PrevLogIndex] != args.PrevLogTerm {
-		LogDebugf("\tfailed - has %d entries, needs %d\n", len(rf.logEntries), args.PrevLogIndex)
-		LogDebugf("\tfailed - non matching log terms %d %d at index %d\n", rf.logTermsReceived[args.PrevLogIndex], args.PrevLogTerm, args.PrevLogIndex)
+		// LogDebugf("\tfailed - has %d entries, needs %d\n", len(rf.logEntries), args.PrevLogIndex)
+		// LogDebugf("\tfailed - non matching log terms %d %d at index %d\n", rf.logTermsReceived[args.PrevLogIndex], args.PrevLogTerm, args.PrevLogIndex)
 		reply.Success = false 
 		return
 	}
@@ -461,7 +484,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// set commit index
 	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex + len(args.LogEntries))
+		rf.commitIndex = min(min(args.LeaderCommit, args.PrevLogIndex + len(args.LogEntries)), len(rf.logEntries)-1)
 	}
 	
 	reply.Success = true;
@@ -489,9 +512,8 @@ func (rf *Raft) sendHeartbeats() {
 		}
 		rf.mu.Unlock()
 		// Sleep for 100 milliseconds
-		delay := 50 // 10 times per second
+		delay := 100 // 10 times per second
 		time.Sleep(time.Duration(delay) * time.Millisecond)
-
 	}
 }
 
@@ -522,23 +544,11 @@ func (rf *Raft) attemptToUpdateCommitIndex() {
 			LogDebugf("%d's commit index is now %d\n", rf.me, start_n)
 			rf.commitIndex = start_n 
 
-			go rf.sendApplyMsg(start_n)
+			// go rf.sendApplyMsg(start_n)
 			// and also quit
 			break
 		}
 	}
-}
-
-func (rf *Raft) sendApplyMsg(index int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	applyMsg := raftapi.ApplyMsg{}
-	applyMsg.CommandValid = true 
-	applyMsg.Command = rf.logEntries[index]
-	applyMsg.CommandIndex = index
-
-	rf.applyCh <- applyMsg
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -549,7 +559,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	if reply.Term > rf.currentTerm && rf.believesLeader {
 		// it's joever, demote from leader
 		rf.believesLeader = false
-		rf.currentTerm = args.Term
+		rf.currentTerm = reply.Term
 		LogDebugf("\t%d demotes (from APPEND from %d at term %d) for term %d\n", rf.me, server, reply.Term, rf.currentTerm)
 	} else if reply.Term <= rf.currentTerm && rf.believesLeader {
 		// alright, process the append entries response
@@ -559,9 +569,14 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			rf.matchIndex[server] = args.PrevLogIndex + len(args.LogEntries)
 			go rf.attemptToUpdateCommitIndex()
 		} else {
-			LogDebugf("\t%d could not append until index %d from %d, resending\n", server, args.PrevLogIndex + len(args.LogEntries), rf.me)
-			rf.nextIndex[server] = max(rf.nextIndex[server] - 1, 1)
-			go rf.AppendToPeer(args.LogEntries[0], server)
+			if rf.nextIndex[server] == 1 {
+				// give up
+				LogDebugf("\t%d could not append until index %d from %d, GIVING UP\n", server, args.PrevLogIndex + len(args.LogEntries), rf.me)
+			} else {
+				LogDebugf("\t%d could not append until index %d from %d, resending\n", server, args.PrevLogIndex + len(args.LogEntries), rf.me)
+				rf.nextIndex[server] = rf.nextIndex[server] - 1
+				go rf.AppendToPeer(args.LogEntries[0], server)
+			}
 		}
 	}
 	
@@ -611,6 +626,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
+	go rf.applyCommands()
 	go rf.sendHeartbeats()
 
 	return rf
