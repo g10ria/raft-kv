@@ -58,6 +58,7 @@ type Raft struct {
 	heartbeatTimer 	 time.Time
 	numVotesReceived int
 	applyCh 		 chan raftapi.ApplyMsg
+	isCandidate		 bool
 }
 
 type RequestVoteArgs struct {
@@ -153,8 +154,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 func (rf *Raft) startElection() {
 	// Staggered election start times
-	// ms := (rand.Int63() % 50) // 20 ms
-	// time.Sleep(time.Duration(ms) * time.Millisecond)
+	ms := (rand.Int63() % 50) // 20 ms
+	time.Sleep(time.Duration(ms) * time.Millisecond)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -182,8 +183,8 @@ func (rf *Raft) startElection() {
 	}
 }
 
-func (rf *Raft) resetHeartbeatTimer() { // jellyfish
-	ms := 500 + (rand.Int63() % 300)
+func (rf *Raft) resetElectionTimeout() {
+	ms := 600 + (rand.Int63() % 650)
 	now := time.Now()
 	candidateTimer := now.Add(time.Duration(ms) * time.Millisecond)
 
@@ -193,6 +194,7 @@ func (rf *Raft) resetHeartbeatTimer() { // jellyfish
 }
 
 // Responds to request vote RPCs
+// give vote
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Received message so update heartbeat
 	rf.mu.Lock()
@@ -200,36 +202,37 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.Term = args.Term
 	reply.VoteGranted = false
+
+	myLastLogIndex := len(rf.logEntries) - 1
+	myLastLogTerm := rf.logTermsReceived[len(rf.logTermsReceived)-1]
+	candidateLogUpToDate := args.LastLogIndex >= myLastLogIndex && args.LastLogTerm >= myLastLogTerm
+
 	// Check if the candidate term is updated
-	if args.Term == rf.currentTerm {
-		// Check if server hasn't voted yet
-		if rf.votedFor == -1 {
-			// Check if the log is up to date
-			myLastLogIndex := len(rf.logEntries) - 1
-			myLastLogTerm := rf.logTermsReceived[len(rf.logTermsReceived)-1]
-
-			LogDebugf("%d: %d in term %d\t%d: %d in term %d\n", rf.me,myLastLogIndex,myLastLogTerm,args.CandidateIndex,args.LastLogIndex, args.LastLogTerm)
-
-			if args.LastLogIndex >= myLastLogIndex && args.LastLogTerm >= myLastLogTerm {
+	if args.Term >= rf.currentTerm {
+		if args.Term > rf.currentTerm {
+			LogDebugf("\t\t%d updating term from %d to %d\n", rf.me, rf.currentTerm, args.Term)
+			rf.believesLeader = false
+			rf.currentTerm = args.Term
+			rf.isCandidate = false
+			rf.votedFor = -1
+		}
+		LogDebugf("1")
+		if rf.votedFor == -1 || rf.votedFor == args.CandidateIndex {
+			LogDebugf("2")
+			if candidateLogUpToDate {
+				LogDebugf("3")
 				// Then grant the vote
 				reply.VoteGranted = true
-				rf.currentTerm = args.Term
 				rf.votedFor = args.CandidateIndex
 			}
 		}
-	} else if args.Term > rf.currentTerm {
-		// step down, if applicable
-		rf.believesLeader = false 
-		rf.votedFor = args.CandidateIndex 
-		rf.currentTerm = args.Term 
-		reply.VoteGranted = true
 	}
 
 	if reply.VoteGranted {
-		rf.resetHeartbeatTimer()
-		LogDebugf("\t\t%d says YES to %d for term %d\n", rf.me, args.CandidateIndex, args.Term)
+		rf.resetElectionTimeout()
+		LogDebugf("\t\t%d (term %d) says YES to %d (term %d)\n", rf.me, rf.currentTerm, args.CandidateIndex, args.Term)
 	} else {
-		LogDebugf("\t\t%d (term %d) says NO to %d for term %d\n", rf.me, rf.currentTerm, args.CandidateIndex, args.Term)
+		LogDebugf("\t\t%d (term %d) says NO to %d (term %d)\n", rf.me, rf.currentTerm, args.CandidateIndex, args.Term)
 	}
 }
 
@@ -264,13 +267,11 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if !rf.believesLeader && reply.VoteGranted && reply.Term == rf.currentTerm {
+	if !rf.believesLeader && reply.VoteGranted && args.Term == rf.currentTerm {
 		rf.numVotesReceived += 1
 		if rf.numVotesReceived >= rf.votesNeededToWin {
 			rf.believesLeader = true
 			LogDebugf("\t%d becomes leader for term %d\n", rf.me, reply.Term)
-
-			// add a dummy entry
 			
 			for i:=0;i<len(rf.peers);i++ {
 				if i != rf.me {
@@ -412,7 +413,8 @@ func (rf *Raft) ticker() {
 		electionTimerRanOut := time.Now().After(rf.heartbeatTimer)
 		
 		if !rf.believesLeader && electionTimerRanOut && rf.votedFor == -1 {
-			rf.resetHeartbeatTimer()
+			rf.resetElectionTimeout()
+			rf.isCandidate = true
 			go rf.startElection()
 		} else if electionTimerRanOut { // reset so that we can vote again
 			rf.votedFor = -1
@@ -441,7 +443,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	} // Assume args.Term >= rf.currentTerm below this line
 
-	rf.resetHeartbeatTimer()
+	rf.resetElectionTimeout()
 
 	if rf.commitIndex < args.LeaderCommit && isHeartbeat {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.logEntries)-1)
@@ -609,6 +611,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.applyCh = applyCh
 
+	rf.isCandidate = false
+
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	// volatile server state below
@@ -619,7 +623,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.matchIndex = make([]int, len(rf.peers))
 
 	rf.believesLeader = false
-	rf.resetHeartbeatTimer()
+	rf.resetElectionTimeout()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
