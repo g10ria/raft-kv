@@ -257,6 +257,7 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 			t1 := time.Now()
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := ts.nCommitted(index)
+				// fmt.Printf("\nCOMMITTED FOR INDEX %d: %d\n", index, nd)
 				if nd > 0 && nd >= expectedServers {
 					// committed
 					if cmd1 == cmd {
@@ -271,7 +272,7 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 			if retry == false {
 				desp := fmt.Sprintf("agreement of %.8s failed", textcmd)
 				tester.AnnotateCheckerFailure(desp, "failed after submitting command")
-				ts.Fatalf("one(%v) failed to reach agreement", cmd)
+				ts.Fatalf("one(%v) failed to reach agreement1", cmd)
 			}
 		} else {
 			time.Sleep(50 * time.Millisecond)
@@ -280,7 +281,7 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 	if ts.checkFinished() == false {
 		desp := fmt.Sprintf("agreement of %.8s failed", textcmd)
 		tester.AnnotateCheckerFailure(desp, "failed after 10-second timeout")
-		ts.Fatalf("one(%v) failed to reach agreement", cmd)
+		ts.Fatalf("one(%v) failed to reach agreement2", cmd)
 	}
 	return -1
 }
