@@ -19,6 +19,7 @@ const (
 	dElection      logTopic = "ELEC"
 	dVote          logTopic = "VOTE"
 	dDisconnect    logTopic = "DISC"
+	dTerm          logTopic = "TERM"
 )
 
 // Retrieve the verbosity level from an environment variable

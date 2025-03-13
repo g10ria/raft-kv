@@ -287,13 +287,19 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 		// Otherwise, if the reply is telling us our term is behind, update our term
 		// No need to reset numVotesReceived because that gets set to 0 when a new election starts
 
-		// TODO: debugprint to dTerm here
+		DebugPrint(dTerm, "S%d updates term from %d to %d", rf.me, rf.currentTerm, reply.Term)
 		rf.currentTerm = reply.Term
 	}
 	return ok
 }
 
-func (rf *Raft) AppendToPeer(command interface{}, peer int) {
+// should basically call this function append latest
+
+// this can lead to errors rn when the response command gives the command back and then it's not actually the latest one
+// so make this function ignore command entirely
+// ONLY append command to leader log in Start function, then start this function in goroutine
+// same for the backtracking
+func (rf *Raft) IssueAppendToPeer(peer int) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -302,86 +308,25 @@ func (rf *Raft) AppendToPeer(command interface{}, peer int) {
 	args.LeaderId = rf.me
 
 	nextIndexToSend := rf.nextIndex[peer]
-	lastLogIndex := len(rf.logEntries) - 1 // includes the newest command
+	lastLogIndex := len(rf.logEntries) - 1
 
-	if nextIndexToSend < lastLogIndex {
-		// send starting at nextIndex
+	args.LeaderCommit = min(rf.commitIndex, rf.matchIndex[peer])
+
+	if nextIndexToSend <= lastLogIndex {
 		args.PrevLogIndex = nextIndexToSend - 1
-		args.PrevLogTerm = rf.logTermsReceived[nextIndexToSend-1]
+		args.PrevLogTerm = rf.logTermsReceived[args.PrevLogIndex]
 
 		args.LogEntries = rf.logEntries[nextIndexToSend:len(rf.logEntries)]
 		args.LogTermsReceived = rf.logTermsReceived[nextIndexToSend:len(rf.logEntries)]
 
 		DebugPrint(dSendAppend, "S%d sending append (from %d to %d) to %d", rf.me, nextIndexToSend, lastLogIndex, peer)
 	} else {
-		// just send the newest command
-		args.PrevLogIndex = lastLogIndex - 1
-		args.PrevLogTerm = rf.logTermsReceived[lastLogIndex-1]
-
-		args.LogEntries = make([]interface{}, 1)
-		args.LogEntries[0] = command
-		args.LogTermsReceived = make([]int, 1)
-		args.LogTermsReceived[0] = rf.currentTerm
-
-		DebugPrint(dSendAppend, "S%d sending append (entry %d) to %d", rf.me, lastLogIndex, peer)
+		// this should never happen
+		// TODO: issue an error
 	}
-
-	args.LeaderCommit = rf.commitIndex
 
 	reply := AppendEntriesReply{}
 	go rf.sendAppendEntries(peer, &args, &reply)
-}
-
-func (rf *Raft) issueAppendEntries(server int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	args := AppendEntriesArgs{}
-	args.Term = rf.currentTerm
-	args.LeaderId = rf.me
-
-	// Always send leader's commit index, regardless of whether it's a heartbeat or not
-	// IMPORTANT TODO: make this the minimum of the leader's commit index and the match index of the follower
-
-	// This should always be the minimum of leader's commit index and the match index of the server
-	// Even if we are sending entries, because the next heartbeat will allow that server to catch up
-	args.LeaderCommit = min(rf.commitIndex, rf.matchIndex[server])
-
-	nextIndexToSend := rf.nextIndex[server]
-	myLastLogIndex := len(rf.logEntries) - 1
-
-	//
-	// Set up AppendEntriesArgs according to if we're heartbeating or not, and how many logs we need to send
-	//
-
-	if nextIndexToSend <= myLastLogIndex {
-		// If we have things to send, issue a non-heartbeat append entries
-		if nextIndexToSend < myLastLogIndex {
-			// Need to send from nextIndexToSend to myLastLogIndex
-			args.PrevLogIndex = nextIndexToSend - 1
-			args.PrevLogTerm = rf.logTermsReceived[nextIndexToSend-1]
-			args.LogEntries = rf.logEntries[nextIndexToSend : myLastLogIndex+1]
-			args.LogTermsReceived = rf.logTermsReceived[nextIndexToSend : myLastLogIndex+1]
-
-			DebugPrint(dSendAppend, "S%d sending append (from %d to %d) to %d", rf.me, nextIndexToSend, myLastLogIndex, server)
-		} else { // nextIndexToSend == myLastLogIndex
-			// Just need to send myLastLogIndex
-			args.PrevLogIndex = myLastLogIndex - 1
-			args.PrevLogTerm = rf.logTermsReceived[myLastLogIndex-1]
-			args.LogEntries = make([]interface{}, 1)
-			args.LogEntries[0] = rf.logEntries[myLastLogIndex]
-			args.LogTermsReceived = make([]int, 1)
-			args.LogTermsReceived[0] = rf.currentTerm
-
-			DebugPrint(dSendAppend, "S%d sending append (entry %d) to %d", rf.me, myLastLogIndex, server)
-		}
-	} else if nextIndexToSend == myLastLogIndex+1 {
-		// Nothing to send, issue a heartbeat append entries (empty log entries)
-		args.LogEntries = make([]interface{}, 0)
-	} else {
-		// This should never happen...
-		// TODO: log error here
-	}
 }
 
 func (rf *Raft) sendHeartbeats() {
@@ -437,7 +382,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.logTermsReceived = append(rf.logTermsReceived, rf.currentTerm)
 		for peer, _ := range rf.peers {
 			if peer != rf.me {
-				go rf.AppendToPeer(command, peer)
+				go rf.IssueAppendToPeer(peer)
 			}
 		}
 	}
@@ -644,7 +589,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			} else {
 				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
 				rf.nextIndex[server] = rf.nextIndex[server] - 1
-				go rf.AppendToPeer(args.LogEntries[0], server)
+				go rf.IssueAppendToPeer(server)
 			}
 		}
 	}
