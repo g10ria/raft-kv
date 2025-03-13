@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+    <style>
+        body { 
+            background-color: #1e1e1e; 
+            color: #ffffff; 
+            font-family: monospace;
+            padding: 20px;
+        }
+        .log-container {
+            display: grid;
+            grid-template-columns: repeat(var(--n-columns), 1fr);
+            gap: 0;
+            border: 1px dotted #444;
+        }
+        .log-entry {
+            padding: 8px;
+            margin: 0;
+            white-space: pre-wrap;
+            border-bottom: 1px dotted #444;
+            border-right: 1px dotted #444;
+            min-height: 1.2em;
+        }
+        .log-entry:last-child {
+            border-right: none;
+        }
+        .log-container:last-child .log-entry {
+            border-bottom: none;
+        }
+        .timestamp {
+            color: #888888;
+        }
+        /* Single column log entries */
+        .log-entry:only-child {
+            border: none;
+            border-bottom: 1px dotted #444;
+        }
+        .log-entry:only-child:last-child {
+            border-bottom: none;
+        }
+    </style>
+    <style>:root { --n-columns: 3; }</style>
+</head>
+<body>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #d08341">S1 Starting election for term 1</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"></div><div class="log-entry"><span style="color: #67a0b2">S2 (term 0) voted YES for 1 (term 1)</span></div></div>
+<div class="log-container"><div class="log-entry"><span style="color: #67a0b2">S0 (term 0) voted YES for 1 (term 1)</span></div><div class="log-entry"></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #d0b343">S1 becomes leader for term 1</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #9a9a99">S1 sending append (entry 1) to 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #9a9a99">S1 sending append (entry 1) to 0</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #4878bc">S1 (term 1) SUCCEEDED append (until 1) to 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #98719f">S1 (LEADER) commit index -> 1</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #4878bc">S1 (term 1) SUCCEEDED append (until 1) to 0</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"></div><div class="log-entry"><span style="color: #98719f">S2 commit index -> 1 (from 0)</span></div></div>
+<div class="log-container"><div class="log-entry"><span style="color: #98719f">S0 commit index -> 1 (from 0)</span></div><div class="log-entry"></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #9a9a99">S1 sending append (entry 2) to 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #9a9a99">S1 sending append (entry 2) to 0</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #4878bc">S1 (term 1) SUCCEEDED append (until 2) to 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #98719f">S1 (LEADER) commit index -> 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #4878bc">S1 (term 1) SUCCEEDED append (until 2) to 0</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"></div><div class="log-entry"><span style="color: #98719f">S2 commit index -> 2 (from 1)</span></div></div>
+<div class="log-container"><div class="log-entry"><span style="color: #98719f">S0 commit index -> 2 (from 1)</span></div><div class="log-entry"></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #9a9a99">S1 sending append (entry 3) to 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #9a9a99">S1 sending append (entry 3) to 0</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #4878bc">S1 (term 1) SUCCEEDED append (until 3) to 2</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #98719f">S1 (LEADER) commit index -> 3</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"><span style="color: #4878bc">S1 (term 1) SUCCEEDED append (until 3) to 0</span></div><div class="log-entry"></div></div>
+<div class="log-container"><div class="log-entry"></div><div class="log-entry"></div><div class="log-entry"><span style="color: #98719f">S2 commit index -> 3 (from 2)</span></div></div>
+<div class="log-container"><div class="log-entry"><span style="color: #98719f">S0 commit index -> 3 (from 2)</span></div><div class="log-entry"></div><div class="log-entry"></div></div>
+<div class="log-entry">PASS
+</div>
+</body>
+</html>
