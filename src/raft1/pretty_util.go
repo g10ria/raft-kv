@@ -23,6 +23,7 @@ const (
 	dHeartbeat     logTopic = "HERT"
 	dTime          logTopic = "TIME"
 	dLock          logTopic = "LOCK"
+	dError         logTopic = "ERRO"
 )
 
 // Retrieve the verbosity level from an environment variable

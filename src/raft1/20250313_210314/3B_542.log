@@ -1,0 +1,36 @@
+000003 TIME S0 reset election timer to 1741915908578
+000011 TIME S1 reset election timer to 1741915908421
+000011 TIME S2 reset election timer to 1741915908152
+
+
+CONNECTING 0
+
+
+
+CONNECTING 1
+
+
+
+CONNECTING 2
+
+Test (3B): basic agreement (reliable network)...
+015870 TIME S2 reset election timer to 1741915910015
+015871 ELEC S2 starting election at 1741915908160
+015871 ELEC S2 Starting election for term 1
+015872 TIME S1 reset election timer to 1741915909947
+015872 VOTE S1 (term 0) voted YES for 2 (term 1)
+015872 LEAD S2 becomes leader for term 1
+015872 TIME S0 reset election timer to 1741915909781
+015872 VOTE S0 (term 0) voted YES for 2 (term 1)
+016149 LEAD S2 sending heartbeat to 0
+016149 LEAD S2 sending heartbeat to 1
+016150 HERT S1 heartbeated from 2
+016150 TIME S1 reset election timer to 1741915910252
+016151 HERT S0 heartbeated from 2
+016151 TIME S0 reset election timer to 1741915910068
+016186 APP1 S2 (term 1) sending append (from 1 to 1) to 0
+016186 APP1 S2 (term 1) sending append (from 1 to 1) to 1
+labrpc.Service.dispatch(): unknown method AppendEntries in Raft.AppendEntries; expecting one of [RequestVote ReceiveAppendEntries]
+labrpc.Service.dispatch(): unknown method AppendEntries in Raft.AppendEntries; expecting one of [RequestVote ReceiveAppendEntries]
+exit status 1
+FAIL	6.5840/raft1	1.626s

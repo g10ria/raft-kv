@@ -19,10 +19,9 @@ TOPICS = {
     "TERM": "#FD971F",
     "HERT": "#ff615c",
     "TIME": "#00813c",
-    "LOCK": "#fe2c79", # ending here
-    "INFO": "#ffffff",
-    "WARN": "#d08341",
+    "LOCK": "#fe2c79",
     "ERRO": "#fe2626",
+    "WARN": "#d08341", # ending here
     "TRCE": "#fe2626",
 }
 # fmt: on
