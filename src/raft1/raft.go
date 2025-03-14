@@ -9,13 +9,14 @@ package raft
 import (
 	//	"bytes"
 
+	"bytes"
 	"math/rand"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	//	"6.5840/labgob"
+	"6.5840/labgob"
 
 	"6.5840/labrpc"
 	"6.5840/raftapi"
@@ -96,13 +97,21 @@ func (rf *Raft) GetState() (int, bool) {
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
 	// Your code here (3C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	// rf.mu.Lock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.logEntries)
+	e.Encode(rf.logTermsReceived)
+	// rf.mu.Unlock()
+
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
+
+	DebugPrint(dPersist, "S%d persisted", rf.me)
+	// str := fmt.Sprintf("%v", rf.logEntries)
+	// DebugPrint(dPersist, "S%d saved %s", rf.me, str)
 }
 
 // restore previously persisted state.
@@ -112,17 +121,28 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	// Your code here (3C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var votedFor int
+	var logEntries []interface{}
+	var logTermsReceived []int
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&logEntries) != nil ||
+		d.Decode(&logTermsReceived) != nil {
+		// rf.mu.Lock()
+		DebugPrint(dError, "S%d had an issue reading persist", rf.me)
+		// rf.mu.Unlock()
+	} else {
+		// rf.mu.Lock()
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.logEntries = logEntries
+		rf.logTermsReceived = logTermsReceived
+		DebugPrint(dPersist, "S%d read persist", rf.me)
+		// rf.mu.Unlock()
+	}
 }
 
 // how many bytes in Raft's persisted log?
@@ -150,7 +170,7 @@ func (rf *Raft) resetElectionTimer() {
 		rf.electionTimer = candidateTimer
 	}
 
-	DebugPrint(dTime, "S%d reset election timer to %d", rf.me, rf.electionTimer.UnixMilli())
+	// DebugPrint(dTime, "S%d reset election timer to %d", rf.me, rf.electionTimer.UnixMilli())
 }
 
 // Responds to request vote RPCs; either gives the vote or not
@@ -194,6 +214,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 				rf.votedFor = args.CandidateIndex
 			}
 		}
+
+		// DebugPrint(dPersist, "S%d 1", rf.me)
+		rf.persist()
 	} else { // Otherwise, tell them that their term is lagging behind, and don't grant them the vote
 		reply.Term = rf.currentTerm
 	}
@@ -250,6 +273,9 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 		// No need to reset numVotesReceived because that gets set to 0 when a new election starts
 		DebugPrint(dTerm, "S%d updates term from %d to %d", rf.me, rf.currentTerm, reply.Term)
 		rf.currentTerm = reply.Term
+
+		// DebugPrint(dPersist, "S%d 2", rf.me)
+		rf.persist()
 	}
 	return ok
 }
@@ -271,7 +297,9 @@ func (rf *Raft) IssueAppendToPeer(peer int) { // move this into the big function
 		args.LogEntries = rf.logEntries[nextIndexToSend:len(rf.logEntries)]
 		args.LogTermsReceived = rf.logTermsReceived[nextIndexToSend:len(rf.logEntries)]
 
-		DebugPrint(dSendAppend, "S%d (term %d) sending append (from %d to %d) to %d", rf.me, rf.currentTerm, nextIndexToSend, lastLogIndex, peer)
+		if nextIndexToSend != 1 {
+			DebugPrint(dSendAppend, "S%d (term %d) sending append (from %d to %d) to %d", rf.me, rf.currentTerm, nextIndexToSend, lastLogIndex, peer)
+		}
 	} else {
 		// This should never happen
 		DebugPrint(dError, "S%d has nextIndex = %d for S%d where lastLogIndex = %d", rf.me, nextIndexToSend, peer, lastLogIndex)
@@ -299,7 +327,7 @@ func (rf *Raft) sendHeartbeats() {
 					reply := AppendEntriesReply{}
 					go rf.sendAppendEntriesHeartbeat(index, &args, &reply)
 
-					DebugPrint(dLeader, "S%d sending heartbeat to %d", rf.me, index)
+					// DebugPrint(dLeader, "S%d sending heartbeat to %d", rf.me, index)
 
 				}
 			}
@@ -338,6 +366,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 				rf.IssueAppendToPeer(peer)
 			}
 		}
+		DebugPrint(dLeader, "S%d received index %d", rf.me, len(rf.logEntries)-1)
+		rf.persist()
 	}
 
 	index := len(rf.logEntries) - 1
@@ -357,6 +387,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
+	DebugPrint(dLeader, "S%d KILLED", rf.me)
 	// Your code here, if desired.
 }
 
@@ -369,22 +400,47 @@ func (rf *Raft) applyCommands() {
 	lastApplied := 0
 
 	for !rf.killed() {
-		time.Sleep(30 * time.Millisecond)
-
 		rf.mu.Lock()
 
 		if rf.commitIndex > lastApplied {
-			lastApplied += 1
+			// NEW CODE TO APPLY MULTIPLE AT ONCE (UP TO 5)
+			num_to_apply := min(10, rf.commitIndex-lastApplied)
+			messages := make([]raftapi.ApplyMsg, num_to_apply)
+			for i := 0; i < num_to_apply; i++ {
+				lastApplied += 1
 
-			applyMsg := raftapi.ApplyMsg{}
-			applyMsg.CommandValid = true
-			applyMsg.Command = rf.logEntries[lastApplied]
-			applyMsg.CommandIndex = lastApplied
+				applyMsg := raftapi.ApplyMsg{}
+				applyMsg.CommandValid = true
+				applyMsg.Command = rf.logEntries[lastApplied]
+				applyMsg.CommandIndex = lastApplied
+
+				DebugPrint(dCommit, "S%d APPLYING %d", rf.me, lastApplied)
+
+				messages[i] = applyMsg
+			}
 			rf.mu.Unlock()
-			rf.applyCh <- applyMsg
+			for i := 0; i < num_to_apply; i++ {
+				rf.applyCh <- messages[i]
+			}
+
+			// OLD CODE TO APPLY JUST ONE
+			// lastApplied += 1
+
+			// applyMsg := raftapi.ApplyMsg{}
+			// applyMsg.CommandValid = true
+			// applyMsg.Command = rf.logEntries[lastApplied]
+			// applyMsg.CommandIndex = lastApplied
+
+			// DebugPrint(dCommit, "S%d APPLYING %d", rf.me, lastApplied)
+			// rf.mu.Unlock()
+
+			// rf.applyCh <- applyMsg
+
 		} else {
 			rf.mu.Unlock()
 		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -398,7 +454,7 @@ func (rf *Raft) ticker() {
 
 		if !rf.believesLeader && electionTimerRanOut && rf.votedFor == -1 {
 			rf.resetElectionTimer()
-			DebugPrint(dElection, "S%d starting election at %d", rf.me, time.Now().UnixMilli())
+			// DebugPrint(dElection, "S%d starting election at %d", rf.me, time.Now().UnixMilli())
 
 			// Increment term
 			rf.currentTerm += 1
@@ -424,8 +480,13 @@ func (rf *Raft) ticker() {
 					go rf.sendRequestVote(index, &args, &reply)
 				}
 			}
+
+			// DebugPrint(dPersist, "S%d 5", rf.me)
+			rf.persist()
 		} else if electionTimerRanOut { // Reset so that we can vote again
 			rf.votedFor = -1
+			// DebugPrint(dPersist, "S%d 6", rf.me)
+			rf.persist()
 		}
 
 		rf.mu.Unlock()
@@ -453,14 +514,14 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 		return
 	} // Below this line, args.Term >= rf.currentTerm
 
-	DebugPrint(dHeartbeat, "S%d heartbeated from %d", rf.me, args.LeaderId)
+	// DebugPrint(dHeartbeat, "S%d heartbeated from %d", rf.me, args.LeaderId)
 	rf.resetElectionTimer()
 
 	if rf.commitIndex < args.LeaderCommit && isHeartbeat {
 		prevCommitIndex := rf.commitIndex
 		rf.commitIndex = min(args.LeaderCommit, len(rf.logEntries)-1)
 		if rf.commitIndex == args.LeaderCommit {
-			DebugPrint(dCommit, "S%d commit index -> %d (from %d)", rf.me, rf.commitIndex, prevCommitIndex)
+			DebugPrint(dCommit, "S%d commit index %d -> %d (from %d)", rf.me, prevCommitIndex, rf.commitIndex, args.LeaderId)
 		}
 	}
 
@@ -469,6 +530,14 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 		rf.believesLeader = false
 		rf.currentTerm = args.Term
 		DebugPrint(dLeader, "S%d demotes for term %d (via append)", rf.me, rf.currentTerm)
+
+		// DebugPrint(dPersist, "S%d 7", rf.me)
+		rf.persist()
+	}
+
+	if rf.currentTerm < args.Term {
+		rf.currentTerm = args.Term // was i not doing this before??? ummm???
+		// should always update their term right??
 	}
 
 	// if it was a heartbeat, just return now :p
@@ -503,6 +572,9 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 		rf.logTermsReceived = slices.Delete(rf.logTermsReceived, args.PrevLogIndex+1, len(rf.logTermsReceived))
 		rf.logEntries = append(rf.logEntries, args.LogEntries...)
 		rf.logTermsReceived = append(rf.logTermsReceived, args.LogTermsReceived...)
+
+		// DebugPrint(dPersist, "S%d 8", rf.me)
+		rf.persist()
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
@@ -519,7 +591,7 @@ func (rf *Raft) sendAppendEntriesHeartbeat(server int, args *AppendEntriesArgs, 
 }
 
 func (rf *Raft) attemptToUpdateCommitIndex() {
-	DebugPrint(dLeader, "S%d updating commit index", rf.me)
+	// DebugPrint(dLeader, "S%d updating commit index", rf.me)
 
 	for start_n := len(rf.logEntries) - 1; start_n > rf.commitIndex; start_n-- {
 		if rf.logTermsReceived[start_n] < rf.currentTerm {
@@ -537,10 +609,13 @@ func (rf *Raft) attemptToUpdateCommitIndex() {
 		if number_matches >= rf.votesNeededToWin {
 			DebugPrint(dCommit, "S%d (LEADER) commit index -> %d", rf.me, start_n)
 			rf.commitIndex = start_n
+
+			// str := fmt.Sprintf("%v", rf.logEntries)
+			// DebugPrint(dLeader, "S%d %s", rf.me, str)
 			break
 		}
 	}
-	DebugPrint(dLeader, "S%d DONE updating commit index", rf.me)
+	// DebugPrint(dLeader, "S%d DONE updating commit index", rf.me)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -554,6 +629,9 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			// We're an outdated leader :( demote!
 			rf.believesLeader = false
 			rf.currentTerm = reply.Term
+
+			// DebugPrint(dPersist, "S%d 9", rf.me)
+			rf.persist()
 
 			DebugPrint(dReceiveAppend, "S%d (term %d) received APPEND from (%d term %d)", rf.me, rf.currentTerm, server, reply.Term)
 			DebugPrint(dLeader, "S%d demotes for term %d", rf.me, rf.currentTerm)
@@ -579,13 +657,33 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				if rf.nextIndex[server] == 1 {
 					// If we've already backed up to the earliest log, just give up entirely
 					DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+					rf.IssueAppendToPeer(server)
 				} else {
 					// Otherwise, decrement by 1 and resend the AppendEntries RPC
 					// TODO: optimize backing up strategy here
-					DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
-					rf.nextIndex[server] = rf.nextIndex[server] - 1
+					// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+					rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
 					rf.IssueAppendToPeer(server)
 				}
+			}
+		}
+	} else {
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+		// something failed
+		if rf.believesLeader && !rf.killed() {
+			// basically - the disconnected server demoted but the recursive issueAppends are still going because of
+			// this else clause!
+			if rf.nextIndex[server] == 1 {
+				// If we've already backed up to the earliest log, just give up entirely
+				DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+				rf.IssueAppendToPeer(server)
+			} else {
+				// Otherwise, decrement by 1 and resend the AppendEntries RPC
+				// TODO: optimize backing up strategy here
+				// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+				rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
+				rf.IssueAppendToPeer(server)
 			}
 		}
 	}
@@ -636,6 +734,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.sendHeartbeats()
 
 	rf.resetElectionTimer()
+
+	// rf.persist()
 
 	return rf
 }

@@ -21,7 +21,7 @@ TOPICS = {
     "TIME": "#00813c",
     "LOCK": "#fe2c79",
     "ERRO": "#fe2626",
-    "WARN": "#d08341", # ending here
+    "PERS": "#d08341", # ending here
     "TRCE": "#fe2626",
 }
 # fmt: on
@@ -166,7 +166,7 @@ def main(
         except:
             # Code from tests or panics does not follow format
             # Print test results regardless of output mode
-            if line.strip().startswith("Test:") or "PASS" in line or "FAIL" in line or line.startswith("panic"):
+            if line.strip().startswith("Test:") or "PASS" in line or "FAIL" in line or "error" in line or line.startswith("panic"):
                 if not panic:
                     print("#" * console.width)
                 print(line, end="")

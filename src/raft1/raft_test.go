@@ -777,34 +777,46 @@ func TestPersist13C(t *testing.T) {
 	ts.Begin("Test (3C): basic persistence")
 
 	ts.one(11, servers, true)
-
+	ts.srvs[0].Raft().DebugDisconnect() // here
 	ts.g.Shutdown()
 	tester.AnnotateShutdownAll()
+
 	ts.g.StartServers()
+	ts.srvs[0].Raft().DebugConnect() // here
 	tester.AnnotateRestartAll()
 
 	ts.one(12, servers, true)
 
 	leader1 := ts.checkOneLeader()
+	ts.srvs[leader1].Raft().DebugDisconnect() // here
 	ts.g.ShutdownServer(leader1)
 	tester.AnnotateShutdown([]int{leader1})
+
 	ts.restart(leader1)
+	ts.srvs[leader1].Raft().DebugConnect() // here
 	tester.AnnotateRestart([]int{leader1})
 
 	ts.one(13, servers, true)
 
 	leader2 := ts.checkOneLeader()
+	ts.srvs[leader2].Raft().DebugDisconnect() // here
 	ts.g.ShutdownServer(leader2)
 	tester.AnnotateShutdown([]int{leader2})
 
 	ts.one(14, servers-1, true)
 
 	ts.restart(leader2)
+	ts.srvs[leader2].Raft().DebugConnect() // here
 	tester.AnnotateRestart([]int{leader2})
 
 	tester.AnnotateCheckerBegin("wait for all servers to commit until index 4")
 	ts.wait(4, servers, -1) // wait for leader2 to join before killing i3
+	// ok we're waiting here forever... never reaching index 4?
 	tester.AnnotateCheckerSuccess("all committed until index 4", "OK")
+	ts.srvs[0].Raft().DebugDisconnect() // at the end
+	ts.srvs[0].Raft().DebugDisconnect()
+	ts.srvs[0].Raft().DebugDisconnect()
+	ts.srvs[0].Raft().DebugDisconnect()
 
 	i3 := (ts.checkOneLeader() + 1) % servers
 	ts.g.ShutdownServer(i3)
@@ -942,6 +954,7 @@ func TestFigure83C(t *testing.T) {
 		}
 
 		if leader != -1 {
+			// ts.srvs[leader].Raft().DebugDisconnect() // here
 			ts.g.ShutdownServer(leader)
 			tester.AnnotateShutdown([]int{leader})
 			nup -= 1
@@ -951,6 +964,7 @@ func TestFigure83C(t *testing.T) {
 			s := rand.Int() % servers
 			if ts.srvs[s].Raft() == nil {
 				ts.restart(s)
+				ts.srvs[s].Raft().DebugConnect() // here
 				tester.AnnotateRestart([]int{s})
 				nup += 1
 			}
@@ -1033,6 +1047,7 @@ func TestFigure8Unreliable3C(t *testing.T) {
 		}
 
 		if leader != -1 && (rand.Int()%1000) < int(RaftElectionTimeout/time.Millisecond)/2 {
+			ts.srvs[leader].Raft().DebugDisconnect()
 			ts.g.DisconnectAll(leader)
 			tester.AnnotateConnection(ts.g.GetConnected())
 			nup -= 1
@@ -1042,6 +1057,7 @@ func TestFigure8Unreliable3C(t *testing.T) {
 			s := rand.Int() % servers
 			if !ts.g.IsConnected(s) {
 				ts.g.ConnectOne(s)
+				ts.srvs[s].Raft().DebugConnect() // here
 				tester.AnnotateConnection(ts.g.GetConnected())
 				nup += 1
 			}
@@ -1051,6 +1067,7 @@ func TestFigure8Unreliable3C(t *testing.T) {
 	for i := 0; i < servers; i++ {
 		if !ts.g.IsConnected(i) {
 			ts.g.ConnectOne(i)
+			ts.srvs[i].Raft().DebugConnect() // here
 		}
 	}
 	tester.AnnotateConnection(ts.g.GetConnected())
@@ -1121,6 +1138,12 @@ func internalChurn(t *testing.T, reliable bool) {
 		ret = values
 	}
 
+	ts.srvs[0].Raft().DebugDisconnect()
+	ts.srvs[0].Raft().DebugDisconnect()
+	ts.srvs[0].Raft().DebugDisconnect()
+	ts.srvs[0].Raft().DebugDisconnect()
+	ts.srvs[0].Raft().DebugDisconnect()
+
 	startcli := tester.GetAnnotateTimestamp()
 	ncli := 3
 	cha := []chan []int{}
@@ -1132,6 +1155,7 @@ func internalChurn(t *testing.T, reliable bool) {
 	for iters := 0; iters < 20; iters++ {
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
+			// ts.srvs[i].Raft().DebugDisconnect()
 			ts.g.DisconnectAll(i)
 			tester.AnnotateConnection(ts.g.GetConnected())
 		}
@@ -1143,12 +1167,14 @@ func internalChurn(t *testing.T, reliable bool) {
 				tester.AnnotateRestart([]int{i})
 			}
 			ts.g.ConnectOne(i)
+			ts.srvs[i].Raft().DebugConnect()
 			tester.AnnotateConnection(ts.g.GetConnected())
 		}
 
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
 			if ts.srvs[i].raft != nil {
+				// ts.srvs[i].Raft().DebugDisconnect()
 				ts.g.ShutdownServer(i)
 				tester.AnnotateShutdown([]int{i})
 			}

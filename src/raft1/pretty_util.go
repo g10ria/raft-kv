@@ -24,6 +24,7 @@ const (
 	dTime          logTopic = "TIME"
 	dLock          logTopic = "LOCK"
 	dError         logTopic = "ERRO"
+	dPersist       logTopic = "PERS"
 )
 
 // Retrieve the verbosity level from an environment variable
