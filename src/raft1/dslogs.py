@@ -17,9 +17,9 @@ TOPICS = {
     "CMIT": "#98719f",
     "ELEC": "#d08341",
     "TERM": "#FD971F",
-    "DROP": "#ff615c",
-    "CLNT": "#00813c",
-    "TEST": "#fe2c79",
+    "HERT": "#ff615c",
+    "TIME": "#00813c",
+    "LOCK": "#fe2c79", # ending here
     "INFO": "#ffffff",
     "WARN": "#d08341",
     "ERRO": "#fe2626",

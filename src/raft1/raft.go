@@ -150,36 +150,9 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 }
 
 func (rf *Raft) startElection() {
-	// Stagger the election start times (I don't think this is necessary but it's okay)
-	ms := (rand.Int63() % 50)
-	time.Sleep(time.Duration(ms) * time.Millisecond)
-
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// Increment term
-	rf.currentTerm += 1
-	DebugPrint(dElection, "S%d Starting election for term %d", rf.me, rf.currentTerm)
-
-	// Vote for self
-	rf.votedFor = rf.me
-	rf.numVotesReceived = 1
-
-	// Issue RequestVote RPCs
-	args := RequestVoteArgs{}
-	args.Term = rf.currentTerm
-	args.CandidateIndex = rf.me
-
-	// Include last log index and last log term (for up-to-date checks)
-	args.LastLogIndex = len(rf.logEntries) - 1
-	args.LastLogTerm = rf.logTermsReceived[len(rf.logTermsReceived)-1]
-
-	for index, _ := range rf.peers {
-		if index != rf.me {
-			reply := RequestVoteReply{}
-			go rf.sendRequestVote(index, &args, &reply)
-		}
-	}
 }
 
 // Resets the election timer to the current time + a random offset
@@ -191,12 +164,16 @@ func (rf *Raft) resetElectionTimer() {
 	if candidateTimer.After(rf.electionTimer) {
 		rf.electionTimer = candidateTimer
 	}
+
+	DebugPrint(dTime, "S%d reset election timer to %d", rf.me, rf.electionTimer.UnixMilli())
 }
 
 // Responds to request vote RPCs; either gives the vote or not
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	// DebugPrint(dLock, "S%d locked 1", rf.me)
 
 	myOldTerm := rf.currentTerm
 
@@ -218,7 +195,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 		// Demote self if I believe I'm the leader currently
 		if args.Term > rf.currentTerm {
-			// TODO: add print statement here about demoting
+			if rf.believesLeader {
+				DebugPrint(dLeader, "S%d demotes for term %d", rf.me, rf.currentTerm)
+			}
 			rf.believesLeader = false
 			rf.currentTerm = args.Term
 			rf.votedFor = -1
@@ -286,23 +265,13 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	} else if reply.Term > rf.currentTerm {
 		// Otherwise, if the reply is telling us our term is behind, update our term
 		// No need to reset numVotesReceived because that gets set to 0 when a new election starts
-
 		DebugPrint(dTerm, "S%d updates term from %d to %d", rf.me, rf.currentTerm, reply.Term)
 		rf.currentTerm = reply.Term
 	}
 	return ok
 }
 
-// should basically call this function append latest
-
-// this can lead to errors rn when the response command gives the command back and then it's not actually the latest one
-// so make this function ignore command entirely
-// ONLY append command to leader log in Start function, then start this function in goroutine
-// same for the backtracking
-func (rf *Raft) IssueAppendToPeer(peer int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
+func (rf *Raft) IssueAppendToPeer(peer int) { // move this into the big function?
 	args := AppendEntriesArgs{}
 	args.Term = rf.currentTerm
 	args.LeaderId = rf.me
@@ -319,7 +288,7 @@ func (rf *Raft) IssueAppendToPeer(peer int) {
 		args.LogEntries = rf.logEntries[nextIndexToSend:len(rf.logEntries)]
 		args.LogTermsReceived = rf.logTermsReceived[nextIndexToSend:len(rf.logEntries)]
 
-		DebugPrint(dSendAppend, "S%d sending append (from %d to %d) to %d", rf.me, nextIndexToSend, lastLogIndex, peer)
+		DebugPrint(dSendAppend, "S%d (term %d) sending append (from %d to %d) to %d", rf.me, rf.currentTerm, nextIndexToSend, lastLogIndex, peer)
 	} else {
 		// this should never happen
 		// TODO: issue an error
@@ -348,13 +317,15 @@ func (rf *Raft) sendHeartbeats() {
 					reply := AppendEntriesReply{}
 					go rf.sendAppendEntriesHeartbeat(index, &args, &reply)
 
+					DebugPrint(dLeader, "S%d sending heartbeat to %d", rf.me, index)
+
 				}
 			}
 		}
 
 		rf.mu.Unlock()
 		// Sleep for 100 milliseconds
-		delay := 100 // 10 times per second
+		delay := 80 // 10 times per second
 		time.Sleep(time.Duration(delay) * time.Millisecond)
 	}
 }
@@ -382,7 +353,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.logTermsReceived = append(rf.logTermsReceived, rf.currentTerm)
 		for peer, _ := range rf.peers {
 			if peer != rf.me {
-				go rf.IssueAppendToPeer(peer)
+				rf.IssueAppendToPeer(peer)
 			}
 		}
 	}
@@ -445,7 +416,33 @@ func (rf *Raft) ticker() {
 
 		if !rf.believesLeader && electionTimerRanOut && rf.votedFor == -1 {
 			rf.resetElectionTimer()
-			go rf.startElection()
+			DebugPrint(dElection, "S%d starting election at %d", rf.me, time.Now().UnixMilli())
+			// go rf.startElection()
+
+			// MOVED START ELECTION STUFF INTO HERE
+			// Increment term
+			rf.currentTerm += 1
+			DebugPrint(dElection, "S%d Starting election for term %d", rf.me, rf.currentTerm)
+
+			// Vote for self
+			rf.votedFor = rf.me
+			rf.numVotesReceived = 1
+
+			// Issue RequestVote RPCs
+			args := RequestVoteArgs{}
+			args.Term = rf.currentTerm
+			args.CandidateIndex = rf.me
+
+			// Include last log index and last log term (for up-to-date checks)
+			args.LastLogIndex = len(rf.logEntries) - 1
+			args.LastLogTerm = rf.logTermsReceived[len(rf.logTermsReceived)-1]
+
+			for index, _ := range rf.peers {
+				if index != rf.me {
+					reply := RequestVoteReply{}
+					go rf.sendRequestVote(index, &args, &reply)
+				}
+			}
 		} else if electionTimerRanOut { // reset so that we can vote again
 			rf.votedFor = -1
 		}
@@ -475,6 +472,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	} // Assume args.Term >= rf.currentTerm below this line
 
+	DebugPrint(dHeartbeat, "S%d heartbeated from %d", rf.me, args.LeaderId)
 	rf.resetElectionTimer()
 
 	if rf.commitIndex < args.LeaderCommit && isHeartbeat {
@@ -489,7 +487,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.believesLeader {
 		rf.believesLeader = false
 		rf.currentTerm = args.Term
-		DebugPrint(dLeader, "S%d demotes for term %d", rf.me, rf.currentTerm)
+		DebugPrint(dLeader, "S%d demotes for term %d (via append)", rf.me, rf.currentTerm)
 	}
 
 	// if it was a heartbeat, just return now :p
@@ -518,6 +516,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if replaceElements {
+		DebugPrint(dReplyAppend, "S%d (term %d) APPENDED %d-%d from %d (term %d)", rf.me, rf.currentTerm, args.PrevLogIndex+1, args.PrevLogIndex+len(args.LogEntries), args.LeaderId, args.Term)
+
 		rf.logEntries = slices.Delete(rf.logEntries, args.PrevLogIndex+1, len(rf.logEntries))
 		rf.logTermsReceived = slices.Delete(rf.logTermsReceived, args.PrevLogIndex+1, len(rf.logTermsReceived))
 		rf.logEntries = append(rf.logEntries, args.LogEntries...)
@@ -526,10 +526,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// set commit index
 	if args.LeaderCommit > rf.commitIndex {
+		// is this right???
 		rf.commitIndex = min(min(args.LeaderCommit, args.PrevLogIndex+len(args.LogEntries)), len(rf.logEntries)-1)
 	}
 
+	// is this right
 	reply.Success = true
+}
+
+func (rf *Raft) DebugDisconnect() {
+	DebugPrint(dLeader, "S%d DISCONNECTED", rf.me)
+}
+
+func (rf *Raft) DebugConnect() {
+	DebugPrint(dLeader, "S%d CONNECTED", rf.me)
 }
 
 func (rf *Raft) sendAppendEntriesHeartbeat(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -538,16 +548,13 @@ func (rf *Raft) sendAppendEntriesHeartbeat(server int, args *AppendEntriesArgs, 
 }
 
 func (rf *Raft) attemptToUpdateCommitIndex() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	DebugPrint(dLeader, "S%d updating commit index", rf.me)
 
 	for start_n := len(rf.logEntries) - 1; start_n > rf.commitIndex; start_n-- {
 		if rf.logTermsReceived[start_n] < rf.currentTerm {
 			// can't commit "back into" a previous term, so just quit
 			break
 		}
-
-		// otherwise attempt to set this as the new commit index
 		number_matches := 1
 		for i := 0; i < len(rf.peers); i++ {
 			if i != rf.me && rf.matchIndex[i] >= start_n {
@@ -560,36 +567,45 @@ func (rf *Raft) attemptToUpdateCommitIndex() {
 			break
 		}
 	}
+	DebugPrint(dLeader, "S%d DONE updating commit index", rf.me)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 
-	if reply.Term > rf.currentTerm && rf.believesLeader {
-		// it's joever, demote from leader
-		rf.believesLeader = false
-		rf.currentTerm = reply.Term
+	if ok {
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
 
-		DebugPrint(dReceiveAppend, "S%d (term %d) received APPEND from (%d term %d)", rf.me, rf.currentTerm, server, reply.Term)
-		DebugPrint(dLeader, "S%d demotes for term %d", rf.me, rf.currentTerm)
-	} else if reply.Term <= rf.currentTerm && rf.believesLeader {
-		// alright, process the append entries response
-		if reply.Success {
-			DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
-			rf.nextIndex[server] = max(args.PrevLogIndex+len(args.LogEntries)+1, rf.nextIndex[server])
-			rf.matchIndex[server] = max(args.PrevLogIndex+len(args.LogEntries), rf.matchIndex[server])
-			go rf.attemptToUpdateCommitIndex()
-			// go rf.sendHeartbeats();
-		} else {
-			if rf.nextIndex[server] == 1 {
-				// give up
-				DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+		// DebugPrint(dLock, "S%d locked 6", rf.me)
+		if reply.Term > rf.currentTerm && rf.believesLeader {
+			// it's joever, demote from leader
+			rf.believesLeader = false
+			rf.currentTerm = reply.Term
+
+			DebugPrint(dReceiveAppend, "S%d (term %d) received APPEND from (%d term %d)", rf.me, rf.currentTerm, server, reply.Term)
+			DebugPrint(dLeader, "S%d demotes for term %d", rf.me, rf.currentTerm)
+		} else if reply.Term <= rf.currentTerm && rf.believesLeader {
+			// alright, process the append entries response
+			if reply.Success {
+				DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+				rf.nextIndex[server] = max(args.PrevLogIndex+len(args.LogEntries)+1, rf.nextIndex[server])
+
+				prevMatchIndex := rf.matchIndex[server]
+				rf.matchIndex[server] = max(args.PrevLogIndex+len(args.LogEntries), rf.matchIndex[server])
+				if prevMatchIndex < rf.matchIndex[server] {
+					// attempt to update commit index
+					rf.attemptToUpdateCommitIndex()
+				}
 			} else {
-				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
-				rf.nextIndex[server] = rf.nextIndex[server] - 1
-				go rf.IssueAppendToPeer(server)
+				if rf.nextIndex[server] == 1 {
+					// give up
+					DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+				} else {
+					DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+					rf.nextIndex[server] = rf.nextIndex[server] - 1
+					rf.IssueAppendToPeer(server)
+				}
 			}
 		}
 	}

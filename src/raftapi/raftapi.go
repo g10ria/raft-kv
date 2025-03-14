@@ -14,6 +14,10 @@ type Raft interface {
 	Snapshot(index int, snapshot []byte)
 	PersistBytes() int
 
+	// Added for debugging
+	DebugDisconnect()
+	DebugConnect()
+
 	// For the tester to indicate to your code that is should cleanup
 	// any long-running go routines.
 	Kill()

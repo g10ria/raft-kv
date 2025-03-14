@@ -1,0 +1,407 @@
+000007 TIME S0 reset election timer to 1741911453560
+000009 TIME S1 reset election timer to 1741911453072
+000010 TIME S2 reset election timer to 1741911453139
+
+
+CONNECTING 0
+
+
+
+CONNECTING 1
+
+
+
+CONNECTING 2
+
+Test (3B): rejoin of partitioned leader (reliable network)...
+015073 TIME S1 reset election timer to 1741911453540
+015073 ELEC S1 starting election at 1741911451965
+015073 ELEC S1 Starting election for term 1
+015075 TIME S2 reset election timer to 1741911453668
+015075 VOTE S2 (term 0) voted YES for 1 (term 1)
+015075 LEAD S1 becomes leader for term 1
+015075 TIME S0 reset election timer to 1741911453734
+015075 VOTE S0 (term 0) voted YES for 1 (term 1)
+015207 APP1 S1 sending append (from 1 to 1) to 2
+015208 APP1 S1 sending append (from 1 to 1) to 0
+015209 HERT S0 heartbeated from 1
+015209 TIME S0 reset election timer to 1741911454072
+015209 APP2 S0 (term 1) APPENDED 1-1 from 1 (term 1)
+015209 HERT S2 heartbeated from 1
+015209 TIME S2 reset election timer to 1741911454025
+015209 APP2 S2 (term 1) APPENDED 1-1 from 1 (term 1)
+015209 APP3 S1 (term 1) SUCCEEDED append (until 1) to 0
+015209 LEAD S1 updating commit index
+015209 CMIT S1 (LEADER) commit index -> 1
+015209 LEAD S1 DONE updating commit index
+015210 APP3 S1 (term 1) SUCCEEDED append (until 1) to 2
+015210 LEAD S1 updating commit index
+015210 LEAD S1 DONE updating commit index
+015322 LEAD S1 sending heartbeat to 0
+015322 LEAD S1 sending heartbeat to 2
+015323 HERT S2 heartbeated from 1
+015323 TIME S2 reset election timer to 1741911454025
+015323 CMIT S2 commit index -> 1 (from 0)
+015323 HERT S0 heartbeated from 1
+015323 TIME S0 reset election timer to 1741911454072
+015323 CMIT S0 commit index -> 1 (from 0)
+016125 LEAD S1 sending heartbeat to 0
+016125 LEAD S1 sending heartbeat to 2
+016126 HERT S2 heartbeated from 1
+016126 HERT S0 heartbeated from 1
+016126 TIME S0 reset election timer to 1741911454072
+016126 TIME S2 reset election timer to 1741911454025
+016928 LEAD S1 sending heartbeat to 0
+016928 LEAD S1 sending heartbeat to 2
+016928 HERT S2 heartbeated from 1
+016928 HERT S0 heartbeated from 1
+016928 TIME S2 reset election timer to 1741911454034
+016928 TIME S0 reset election timer to 1741911454126
+017731 LEAD S1 sending heartbeat to 0
+017731 LEAD S1 sending heartbeat to 2
+017732 HERT S0 heartbeated from 1
+017732 TIME S0 reset election timer to 1741911454126
+017732 HERT S2 heartbeated from 1
+017732 TIME S2 reset election timer to 1741911454034
+018538 LEAD S1 sending heartbeat to 0
+018538 LEAD S1 sending heartbeat to 2
+018539 HERT S2 heartbeated from 1
+018539 HERT S0 heartbeated from 1
+018539 TIME S0 reset election timer to 1741911454237
+018539 TIME S2 reset election timer to 1741911454344
+019343 LEAD S1 sending heartbeat to 0
+019344 LEAD S1 sending heartbeat to 2
+019344 HERT S2 heartbeated from 1
+019344 HERT S0 heartbeated from 1
+019344 TIME S0 reset election timer to 1741911454237
+019344 TIME S2 reset election timer to 1741911454344
+020144 LEAD S1 sending heartbeat to 0
+020145 LEAD S1 sending heartbeat to 2
+020146 HERT S2 heartbeated from 1
+020146 TIME S2 reset election timer to 1741911454617
+020146 HERT S0 heartbeated from 1
+020146 TIME S0 reset election timer to 1741911454237
+
+
+DISCONNECTING 1
+
+020290 LEAD S1 DISCONNECTED
+020290 APP1 S1 sending append (from 2 to 4) to 2
+020291 APP1 S1 sending append (from 2 to 4) to 0
+020291 APP1 S1 sending append (from 2 to 4) to 2
+020291 APP1 S1 sending append (from 2 to 4) to 0
+020291 APP1 S1 sending append (from 2 to 4) to 0
+020291 APP1 S1 sending append (from 2 to 4) to 2
+020949 LEAD S1 sending heartbeat to 0
+020949 LEAD S1 sending heartbeat to 2
+021751 LEAD S1 sending heartbeat to 0
+021752 LEAD S1 sending heartbeat to 2
+022556 LEAD S1 sending heartbeat to 0
+022556 LEAD S1 sending heartbeat to 2
+023367 LEAD S1 sending heartbeat to 0
+023367 LEAD S1 sending heartbeat to 2
+024169 LEAD S1 sending heartbeat to 0
+024169 LEAD S1 sending heartbeat to 2
+024969 LEAD S1 sending heartbeat to 0
+024969 LEAD S1 sending heartbeat to 2
+025776 LEAD S1 sending heartbeat to 0
+025776 LEAD S1 sending heartbeat to 2
+026583 LEAD S1 sending heartbeat to 0
+026583 LEAD S1 sending heartbeat to 2
+027387 LEAD S1 sending heartbeat to 0
+027387 LEAD S1 sending heartbeat to 2
+028189 LEAD S1 sending heartbeat to 0
+028189 LEAD S1 sending heartbeat to 2
+028999 LEAD S1 sending heartbeat to 0
+028999 LEAD S1 sending heartbeat to 2
+029806 LEAD S1 sending heartbeat to 0
+029806 LEAD S1 sending heartbeat to 2
+030612 LEAD S1 sending heartbeat to 0
+030612 LEAD S1 sending heartbeat to 2
+031412 LEAD S1 sending heartbeat to 0
+031412 LEAD S1 sending heartbeat to 2
+032223 LEAD S1 sending heartbeat to 0
+032223 LEAD S1 sending heartbeat to 2
+033028 LEAD S1 sending heartbeat to 0
+033028 LEAD S1 sending heartbeat to 2
+033835 LEAD S1 sending heartbeat to 0
+033836 LEAD S1 sending heartbeat to 2
+034644 LEAD S1 sending heartbeat to 0
+034644 LEAD S1 sending heartbeat to 2
+035446 LEAD S1 sending heartbeat to 0
+035446 LEAD S1 sending heartbeat to 2
+036250 LEAD S1 sending heartbeat to 0
+036250 LEAD S1 sending heartbeat to 2
+037052 LEAD S1 sending heartbeat to 0
+037052 LEAD S1 sending heartbeat to 2
+037862 LEAD S1 sending heartbeat to 0
+037862 LEAD S1 sending heartbeat to 2
+037965 TIME S0 reset election timer to 1741911455876
+037965 ELEC S0 starting election at 1741911454254
+037965 ELEC S0 Starting election for term 2
+037966 TIME S2 reset election timer to 1741911456389
+037966 VOTE S2 (term 1) voted YES for 0 (term 2)
+037966 LEAD S0 becomes leader for term 2
+038468 APP1 S0 sending append (from 2 to 2) to 2
+038468 APP1 S0 sending append (from 2 to 2) to 1
+038469 HERT S2 heartbeated from 0
+038469 TIME S2 reset election timer to 1741911456389
+038469 APP2 S2 (term 2) APPENDED 2-2 from 0 (term 2)
+038469 APP3 S0 (term 2) SUCCEEDED append (until 2) to 2
+038469 LEAD S0 updating commit index
+038469 CMIT S0 (LEADER) commit index -> 2
+038469 LEAD S0 DONE updating commit index
+038664 LEAD S1 sending heartbeat to 0
+038664 LEAD S1 sending heartbeat to 2
+038665 LEAD S0 sending heartbeat to 1
+038665 LEAD S0 sending heartbeat to 2
+038665 HERT S2 heartbeated from 0
+038665 TIME S2 reset election timer to 1741911456389
+038665 CMIT S2 commit index -> 2 (from 1)
+039466 LEAD S0 sending heartbeat to 1
+039466 LEAD S0 sending heartbeat to 2
+039466 LEAD S1 sending heartbeat to 0
+039466 LEAD S1 sending heartbeat to 2
+039467 HERT S2 heartbeated from 0
+039467 TIME S2 reset election timer to 1741911456389
+040271 LEAD S0 sending heartbeat to 1
+040271 LEAD S0 sending heartbeat to 2
+040271 LEAD S1 sending heartbeat to 0
+040271 LEAD S1 sending heartbeat to 2
+040271 HERT S2 heartbeated from 0
+040271 TIME S2 reset election timer to 1741911456389
+041077 LEAD S0 sending heartbeat to 1
+041077 LEAD S0 sending heartbeat to 2
+041077 LEAD S1 sending heartbeat to 0
+041077 LEAD S1 sending heartbeat to 2
+041078 HERT S2 heartbeated from 0
+041078 TIME S2 reset election timer to 1741911456571
+041884 LEAD S0 sending heartbeat to 1
+041884 LEAD S0 sending heartbeat to 2
+041884 LEAD S1 sending heartbeat to 0
+041884 LEAD S1 sending heartbeat to 2
+041884 HERT S2 heartbeated from 0
+041885 TIME S2 reset election timer to 1741911456571
+042690 LEAD S0 sending heartbeat to 1
+042690 LEAD S0 sending heartbeat to 2
+042690 LEAD S1 sending heartbeat to 0
+042690 LEAD S1 sending heartbeat to 2
+042691 HERT S2 heartbeated from 0
+042691 TIME S2 reset election timer to 1741911456589
+043495 LEAD S1 sending heartbeat to 0
+043495 LEAD S0 sending heartbeat to 1
+043495 LEAD S0 sending heartbeat to 2
+043495 LEAD S1 sending heartbeat to 2
+043496 HERT S2 heartbeated from 0
+043496 TIME S2 reset election timer to 1741911456796
+
+
+DISCONNECTING 0
+
+044302 LEAD S0 DISCONNECTED
+
+
+CONNECTING 1
+
+044302 LEAD S1 sending heartbeat to 0
+044303 LEAD S1 sending heartbeat to 2
+044302 LEAD S1 CONNECTED
+044303 APP1 S1 sending append (from 2 to 5) to 2
+044304 APP2 S2 (term 2) ignoring HEARTBEAT from 1 (term 1)
+044304 APP2 S2 (term 2) ignoring APPEND from 1 (term 1)
+044304 APP3 S1 (term 2) received APPEND from (2 term 2)
+044304 LEAD S1 demotes for term 2
+044303 LEAD S0 sending heartbeat to 1
+044304 LEAD S0 sending heartbeat to 2
+044304 APP1 S1 sending append (from 2 to 5) to 0
+044304 APP2 S0 (term 2) ignoring HEARTBEAT from 1 (term 1)
+044305 HERT S0 heartbeated from 1
+044305 TIME S0 reset election timer to 1741911456965
+044305 LEAD S0 demotes for term 2
+044305 APP2 S0 (term 2) APPENDED 2-5 from 1 (term 2)
+044376 TIME S1 reset election timer to 1741911456434
+044376 ELEC S1 starting election at 1741911454895
+044376 ELEC S1 Starting election for term 3
+044376 VOTE S2 (term 2) voted NO for 1 (term 3)
+044377 TIME S0 reset election timer to 1741911456965
+044377 VOTE S0 (term 2) voted YES for 1 (term 3)
+044377 LEAD S1 becomes leader for term 3
+045110 LEAD S1 sending heartbeat to 0
+045110 LEAD S1 sending heartbeat to 2
+045110 HERT S0 heartbeated from 1
+045110 HERT S2 heartbeated from 1
+045110 TIME S2 reset election timer to 1741911456877
+045110 TIME S0 reset election timer to 1741911456965
+045918 LEAD S1 sending heartbeat to 0
+045918 LEAD S1 sending heartbeat to 2
+045918 HERT S2 heartbeated from 1
+045918 TIME S2 reset election timer to 1741911457157
+045919 HERT S0 heartbeated from 1
+045919 TIME S0 reset election timer to 1741911456965
+046719 LEAD S1 sending heartbeat to 0
+046719 LEAD S1 sending heartbeat to 2
+046719 HERT S2 heartbeated from 1
+046719 TIME S2 reset election timer to 1741911457157
+046720 HERT S0 heartbeated from 1
+046720 TIME S0 reset election timer to 1741911457250
+047527 LEAD S1 sending heartbeat to 0
+047527 LEAD S1 sending heartbeat to 2
+047528 HERT S2 heartbeated from 1
+047528 TIME S2 reset election timer to 1741911457157
+047529 HERT S0 heartbeated from 1
+047529 TIME S0 reset election timer to 1741911457250
+048337 LEAD S1 sending heartbeat to 0
+048338 LEAD S1 sending heartbeat to 2
+048338 HERT S2 heartbeated from 1
+048338 TIME S2 reset election timer to 1741911457157
+048339 HERT S0 heartbeated from 1
+048339 TIME S0 reset election timer to 1741911457250
+049144 LEAD S1 sending heartbeat to 0
+049144 LEAD S1 sending heartbeat to 2
+049145 HERT S2 heartbeated from 1
+049145 TIME S2 reset election timer to 1741911457316
+049146 HERT S0 heartbeated from 1
+049146 TIME S0 reset election timer to 1741911457250
+049950 LEAD S1 sending heartbeat to 0
+049950 LEAD S1 sending heartbeat to 2
+049951 HERT S2 heartbeated from 1
+049951 TIME S2 reset election timer to 1741911457316
+049951 HERT S0 heartbeated from 1
+049951 TIME S0 reset election timer to 1741911457250
+050761 LEAD S1 sending heartbeat to 0
+050761 LEAD S1 sending heartbeat to 2
+050762 HERT S2 heartbeated from 1
+050762 TIME S2 reset election timer to 1741911457316
+050762 HERT S0 heartbeated from 1
+050762 TIME S0 reset election timer to 1741911457529
+051568 LEAD S1 sending heartbeat to 0
+051568 LEAD S1 sending heartbeat to 2
+051569 HERT S2 heartbeated from 1
+051569 TIME S2 reset election timer to 1741911457316
+051569 HERT S0 heartbeated from 1
+051569 TIME S0 reset election timer to 1741911457529
+052376 LEAD S1 sending heartbeat to 0
+052376 LEAD S1 sending heartbeat to 2
+052377 HERT S2 heartbeated from 1
+052377 HERT S0 heartbeated from 1
+052377 TIME S0 reset election timer to 1741911457778
+052377 TIME S2 reset election timer to 1741911457661
+053181 LEAD S1 sending heartbeat to 0
+053181 LEAD S1 sending heartbeat to 2
+053182 HERT S2 heartbeated from 1
+053182 TIME S2 reset election timer to 1741911457671
+053182 HERT S0 heartbeated from 1
+053182 TIME S0 reset election timer to 1741911457778
+053989 LEAD S1 sending heartbeat to 0
+053989 LEAD S1 sending heartbeat to 2
+053990 HERT S2 heartbeated from 1
+053990 TIME S2 reset election timer to 1741911457906
+053991 HERT S0 heartbeated from 1
+053991 TIME S0 reset election timer to 1741911457778
+054792 LEAD S1 sending heartbeat to 0
+054792 LEAD S1 sending heartbeat to 2
+054793 HERT S2 heartbeated from 1
+054793 TIME S2 reset election timer to 1741911457912
+054793 HERT S0 heartbeated from 1
+054794 TIME S0 reset election timer to 1741911457778
+055597 LEAD S1 sending heartbeat to 0
+055597 LEAD S1 sending heartbeat to 2
+055598 HERT S2 heartbeated from 1
+055598 TIME S2 reset election timer to 1741911457914
+055599 HERT S0 heartbeated from 1
+055599 TIME S0 reset election timer to 1741911457778
+056407 LEAD S1 sending heartbeat to 0
+056407 LEAD S1 sending heartbeat to 2
+056408 HERT S2 heartbeated from 1
+056408 TIME S2 reset election timer to 1741911457914
+056408 HERT S0 heartbeated from 1
+056408 TIME S0 reset election timer to 1741911458228
+057214 LEAD S1 sending heartbeat to 0
+057214 LEAD S1 sending heartbeat to 2
+057214 HERT S0 heartbeated from 1
+057214 TIME S0 reset election timer to 1741911458228
+057214 HERT S2 heartbeated from 1
+057215 TIME S2 reset election timer to 1741911457914
+058021 LEAD S1 sending heartbeat to 0
+058021 LEAD S1 sending heartbeat to 2
+058022 HERT S0 heartbeated from 1
+058022 TIME S0 reset election timer to 1741911458228
+058022 HERT S2 heartbeated from 1
+058022 TIME S2 reset election timer to 1741911457914
+058827 LEAD S1 sending heartbeat to 0
+058827 LEAD S1 sending heartbeat to 2
+058828 HERT S2 heartbeated from 1
+058828 TIME S2 reset election timer to 1741911458290
+058828 HERT S0 heartbeated from 1
+058828 TIME S0 reset election timer to 1741911458228
+059634 LEAD S1 sending heartbeat to 0
+059635 LEAD S1 sending heartbeat to 2
+059635 HERT S2 heartbeated from 1
+059635 TIME S2 reset election timer to 1741911458290
+059636 HERT S0 heartbeated from 1
+059636 TIME S0 reset election timer to 1741911458228
+060439 LEAD S1 sending heartbeat to 0
+060440 LEAD S1 sending heartbeat to 2
+060441 HERT S2 heartbeated from 1
+060441 TIME S2 reset election timer to 1741911458311
+060441 HERT S0 heartbeated from 1
+060441 TIME S0 reset election timer to 1741911458593
+061250 LEAD S1 sending heartbeat to 0
+061250 LEAD S1 sending heartbeat to 2
+061251 HERT S2 heartbeated from 1
+061251 TIME S2 reset election timer to 1741911458311
+061252 HERT S0 heartbeated from 1
+061252 TIME S0 reset election timer to 1741911458593
+062055 LEAD S1 sending heartbeat to 0
+062055 LEAD S1 sending heartbeat to 2
+062056 HERT S2 heartbeated from 1
+062056 TIME S2 reset election timer to 1741911458453
+062056 HERT S0 heartbeated from 1
+062056 TIME S0 reset election timer to 1741911458593
+062861 LEAD S1 sending heartbeat to 0
+062861 LEAD S1 sending heartbeat to 2
+062862 HERT S2 heartbeated from 1
+062862 TIME S2 reset election timer to 1741911458634
+062862 HERT S0 heartbeated from 1
+062862 TIME S0 reset election timer to 1741911458657
+063665 LEAD S1 sending heartbeat to 0
+063665 LEAD S1 sending heartbeat to 2
+063666 HERT S2 heartbeated from 1
+063666 TIME S2 reset election timer to 1741911458634
+063667 HERT S0 heartbeated from 1
+063667 TIME S0 reset election timer to 1741911458657
+064325 APP1 S1 sending append (from 6 to 6) to 2
+064327 APP1 S1 sending append (from 6 to 6) to 0
+064328 HERT S2 heartbeated from 1
+064328 TIME S2 reset election timer to 1741911458937
+064329 APP3 S1 (term 3) RESENDING append (until 6) to 2
+064329 APP1 S1 sending append (from 5 to 6) to 2
+064330 HERT S2 heartbeated from 1
+064330 TIME S2 reset election timer to 1741911458937
+064331 APP3 S1 (term 3) RESENDING append (until 6) to 2
+064331 APP1 S1 sending append (from 4 to 6) to 2
+064331 HERT S2 heartbeated from 1
+064332 TIME S2 reset election timer to 1741911458937
+064332 HERT S0 heartbeated from 1
+064332 TIME S0 reset election timer to 1741911458657
+064332 APP2 S0 (term 3) APPENDED 6-6 from 1 (term 3)
+064332 APP3 S1 (term 3) RESENDING append (until 6) to 2
+064332 APP1 S1 sending append (from 3 to 6) to 2
+064332 APP3 S1 (term 3) SUCCEEDED append (until 6) to 0
+064333 LEAD S1 updating commit index
+064333 HERT S2 heartbeated from 1
+064333 TIME S2 reset election timer to 1741911458937
+064333 CMIT S1 (LEADER) commit index -> 6
+064333 LEAD S1 DONE updating commit index
+064333 APP3 S1 (term 3) RESENDING append (until 6) to 2
+064333 APP1 S1 sending append (from 2 to 6) to 2
+064334 HERT S2 heartbeated from 1
+064334 TIME S2 reset election timer to 1741911458937
+064334 APP2 S2 (term 3) APPENDED 2-6 from 1 (term 3)
+064335 APP3 S1 (term 3) SUCCEEDED append (until 6) to 2
+064335 LEAD S1 updating commit index
+064335 LEAD S1 DONE updating commit index
+info: wrote visualization to /tmp/porcupine-4244565492.html
+apply error: commit index=2 server=1 102 != server=2 103
+exit status 1
+FAIL	6.5840/raft1	6.438s
