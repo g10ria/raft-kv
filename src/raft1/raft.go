@@ -1,14 +1,6 @@
 package raft
 
-// The file raftapi/raft.go defines the interface that raft must
-// expose to servers (or the tester), but see comments below for each
-// of these functions for more details.
-//
-// Make() creates a new raft peer that implements the raft interface.
-
 import (
-	//	"bytes"
-
 	"bytes"
 	"math/rand"
 	"slices"
@@ -32,24 +24,28 @@ func (rf *Raft) DebugConnect() {
 }
 
 type Raft struct {
-	mu               sync.Mutex            // lock to protect shared access to this peer's state
-	peers            []*labrpc.ClientEnd   // RPC end points of all peers
-	votesNeededToWin int                   // shortcut to store what a majority of peers entails
-	persister        *tester.Persister     // object to hold this peer's persisted state
-	me               int                   // this peer's index into peers[]
-	dead             int32                 // set by Kill()
-	currentTerm      int                   // last term the server saw (initialize at 0)
-	votedFor         int                   // index of last voted-for peer (-1 if none)
-	logEntries       []interface{}         // log entry data
-	logTermsReceived []int                 // term when each log entry was receieved
-	commitIndex      int                   // index of highest log entry known to be committed
-	lastApplied      int                   // index of highest log entry known to be applied
-	nextIndex        []int                 // for each server, index of next log entry to send to that server
-	matchIndex       []int                 // for each server, index of highest log entry known to be replicated on server
-	believesLeader   bool                  // if the server believes it is the leader
-	electionTimer    time.Time             // tracks when the current election timer is set to run out
-	numVotesReceived int                   // number of votes received for current election so far
-	applyCh          chan raftapi.ApplyMsg // channel to apply messages on
+	mu                sync.Mutex            // lock to protect shared access to this peer's state
+	peers             []*labrpc.ClientEnd   // RPC end points of all peers
+	votesNeededToWin  int                   // shortcut to store what a majority of peers entails
+	persister         *tester.Persister     // object to hold this peer's persisted state
+	me                int                   // this peer's index into peers[]
+	dead              int32                 // set by Kill()
+	currentTerm       int                   // last term the server saw (initialize at 0)
+	votedFor          int                   // index of last voted-for peer (-1 if none)
+	logEntries        []interface{}         // log entry data
+	logTermsReceived  []int                 // term when each log entry was receieved
+	commitIndex       int                   // index of highest log entry known to be committed
+	lastApplied       int                   // index of highest log entry known to be applied
+	nextIndex         []int                 // for each server, index of next log entry to send to that server
+	matchIndex        []int                 // for each server, index of highest log entry known to be replicated on server
+	believesLeader    bool                  // if the server believes it is the leader
+	electionTimer     time.Time             // tracks when the current election timer is set to run out
+	numVotesReceived  int                   // number of votes received for current election so far
+	applyCh           chan raftapi.ApplyMsg // channel to apply messages on
+	logStart          int                   // Earliest log index that hasn't been snapshotted (default to 0)
+	snapshot          []byte                // Most recently provided snapshot (default to nil)
+	snapshotLastIndex int                   // Last included log index in the snapshot (set when saving snapshot)
+	snapshotLastTerm  int                   // Last included term in the snapshot (set when saving snapshot)
 }
 
 type RequestVoteArgs struct {
@@ -85,33 +81,38 @@ type AppendEntriesReply struct {
 // Return currentTerm and whether this server believes it is the leader
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	term := rf.currentTerm
 	isLeader := rf.believesLeader
-	rf.mu.Unlock()
 	return term, isLeader
 }
 
-// before you've implemented snapshots, you should pass nil as the
-// second argument to persister.Save().
-// after you've implemented snapshots, pass the current snapshot
-// (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
+	// Set up encoder
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
+
+	// Encode necessary data fields
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
-	e.Encode(rf.logEntries)
-	e.Encode(rf.logTermsReceived)
+	e.Encode(rf.logEntries[rf.logStart:])       // Save compacted log
+	e.Encode(rf.logTermsReceived[rf.logStart:]) // Save compacted log
 
+	e.Encode(rf.snapshotLastIndex)
+	e.Encode(rf.snapshotLastTerm)
+
+	// Save with persister
 	raftstate := w.Bytes()
-	rf.persister.Save(raftstate, nil)
+	rf.persister.Save(raftstate, rf.snapshot)
 
 	DebugPrint(dPersist, "S%d persisted", rf.me)
 }
 
 // restore previously persisted state.
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+func (rf *Raft) readPersist(data []byte, snapshot []byte) {
+	if len(data) < 1 {
+		// Ignore if no state
 		return
 	}
 
@@ -121,16 +122,47 @@ func (rf *Raft) readPersist(data []byte) {
 	var votedFor int
 	var logEntries []interface{}
 	var logTermsReceived []int
+
+	var snapshotLastIndex int
+	var snapshotLastTerm int
+
 	if d.Decode(&currentTerm) != nil ||
 		d.Decode(&votedFor) != nil ||
 		d.Decode(&logEntries) != nil ||
-		d.Decode(&logTermsReceived) != nil {
+		d.Decode(&logTermsReceived) != nil ||
+		d.Decode(&snapshotLastIndex) != nil ||
+		d.Decode(&snapshotLastTerm) != nil {
 		DebugPrint(dError, "S%d had an issue reading persist", rf.me)
 	} else {
-		rf.currentTerm = currentTerm
-		rf.votedFor = votedFor
-		rf.logEntries = logEntries
-		rf.logTermsReceived = logTermsReceived
+		if snapshotLastIndex == 0 { // No snapshot was saved
+			DebugPrint(dPersist, "S%d started up and did not install snapshot", rf.me)
+			// No snapshots to install, just copy in everything
+			rf.currentTerm = currentTerm
+			rf.votedFor = votedFor
+			rf.logEntries = logEntries
+			rf.logTermsReceived = logTermsReceived
+		} else { // A snapshot should have been saved
+			DebugPrint(dPersist, "S%d started up and installed snapshot (up to %d)", rf.me, snapshotLastIndex)
+			// Install the snapshot and set logStart accordingly
+			rf.snapshot = snapshot
+			rf.snapshotLastIndex = snapshotLastIndex
+			rf.snapshotLastTerm = snapshotLastTerm
+
+			rf.logStart = rf.snapshotLastIndex + 1
+
+			rf.currentTerm = currentTerm
+			rf.votedFor = votedFor
+
+			dummyLogs := make([]interface{}, snapshotLastIndex)
+			dummyTerms := make([]int, rf.snapshotLastIndex)
+			rf.logEntries = append(dummyLogs, logEntries...)
+			rf.logTermsReceived = append(dummyTerms, logTermsReceived...)
+
+			// copy in the term, even though the corresponding entry is empty (saved in the snapshot)
+			// since we use this for various checks
+			rf.logTermsReceived[snapshotLastIndex] = rf.snapshotLastTerm
+		}
+
 		DebugPrint(dPersist, "S%d read persist", rf.me)
 	}
 }
@@ -142,12 +174,21 @@ func (rf *Raft) PersistBytes() int {
 	return rf.persister.RaftStateSize()
 }
 
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (3D).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	// If we have enough entries to actually hit that index and
+	// if we haven't already saved a more up-to-date snapshot
+	if index <= len(rf.logEntries) && index >= rf.logStart {
+		rf.logStart = index // REMOVE FOR INITIAL TESTING
+		// Save snapshot info
+		rf.snapshot = snapshot
+		rf.snapshotLastIndex = index
+		rf.snapshotLastTerm = rf.logTermsReceived[index]
+		// And persist it
+		rf.persist()
+	}
 }
 
 // Resets the election timer to the current time + a random offset
@@ -159,8 +200,6 @@ func (rf *Raft) resetElectionTimer() {
 	if candidateTimer.After(rf.electionTimer) {
 		rf.electionTimer = candidateTimer
 	}
-
-	// DebugPrint(dTime, "S%d reset election timer to %d", rf.me, rf.electionTimer.UnixMilli())
 }
 
 // Responds to request vote RPCs; either gives the vote or not
@@ -280,7 +319,10 @@ func (rf *Raft) IssueAppendToPeer(peer int) { // move this into the big function
 
 	args.LeaderCommit = min(rf.commitIndex, rf.matchIndex[peer])
 
-	if nextIndexToSend <= lastLogIndex {
+	if nextIndexToSend < rf.logStart {
+		// Need to send a snapshot because the nextIndexToSend is before logStart
+		DebugPrint(dSendAppend, "S%d sending snapshot to %d", rf.me, peer)
+	} else if nextIndexToSend <= lastLogIndex {
 		args.PrevLogIndex = nextIndexToSend - 1
 		args.PrevLogTerm = rf.logTermsReceived[args.PrevLogIndex]
 
@@ -740,7 +782,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.believesLeader = false
 
 	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
+	rf.readPersist(persister.ReadRaftState(), persister.ReadSnapshot())
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
