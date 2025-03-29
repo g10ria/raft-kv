@@ -77,6 +77,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+	XTerm   int
+	XIndex  int
+	XLen    int
 }
 
 // Return currentTerm and whether this server believes it is the leader
@@ -88,30 +91,22 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isLeader
 }
 
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
 // before you've implemented snapshots, you should pass nil as the
 // second argument to persister.Save().
 // after you've implemented snapshots, pass the current snapshot
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
-	// Your code here (3C).
-	// rf.mu.Lock()
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.logEntries)
 	e.Encode(rf.logTermsReceived)
-	// rf.mu.Unlock()
 
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, nil)
 
 	DebugPrint(dPersist, "S%d persisted", rf.me)
-	// str := fmt.Sprintf("%v", rf.logEntries)
-	// DebugPrint(dPersist, "S%d saved %s", rf.me, str)
 }
 
 // restore previously persisted state.
@@ -119,8 +114,7 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (3C).
-	// Example:
+
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var currentTerm int
@@ -131,21 +125,17 @@ func (rf *Raft) readPersist(data []byte) {
 		d.Decode(&votedFor) != nil ||
 		d.Decode(&logEntries) != nil ||
 		d.Decode(&logTermsReceived) != nil {
-		// rf.mu.Lock()
 		DebugPrint(dError, "S%d had an issue reading persist", rf.me)
-		// rf.mu.Unlock()
 	} else {
-		// rf.mu.Lock()
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.logEntries = logEntries
 		rf.logTermsReceived = logTermsReceived
 		DebugPrint(dPersist, "S%d read persist", rf.me)
-		// rf.mu.Unlock()
 	}
 }
 
-// how many bytes in Raft's persisted log?
+// returns how many bytes in Raft's persisted log
 func (rf *Raft) PersistBytes() int {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -328,14 +318,12 @@ func (rf *Raft) sendHeartbeats() {
 					go rf.sendAppendEntriesHeartbeat(index, &args, &reply)
 
 					// DebugPrint(dLeader, "S%d sending heartbeat to %d", rf.me, index)
-
 				}
 			}
 		}
 
 		rf.mu.Unlock()
-		// Sleep for 100 milliseconds
-		delay := 80 // 10 times per second
+		delay := 80 // ~10 times per second
 		time.Sleep(time.Duration(delay) * time.Millisecond)
 	}
 }
@@ -376,19 +364,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
-// the tester doesn't halt goroutines created by Raft after each test,
-// but it does call the Kill() method. your code can use killed() to
-// check whether Kill() has been called. the use of atomic avoids the
-// need for a lock.
-//
-// the issue is that long-running goroutines use memory and may chew
-// up CPU time, perhaps causing later tests to fail and generating
-// confusing debug output. any goroutine with a long-running loop
-// should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	DebugPrint(dLeader, "S%d KILLED", rf.me)
-	// Your code here, if desired.
 }
 
 func (rf *Raft) killed() bool {
@@ -403,7 +381,7 @@ func (rf *Raft) applyCommands() {
 		rf.mu.Lock()
 
 		if rf.commitIndex > lastApplied {
-			// NEW CODE TO APPLY MULTIPLE AT ONCE (UP TO 5)
+			// Applies up to 5 commits at once
 			num_to_apply := min(10, rf.commitIndex-lastApplied)
 			messages := make([]raftapi.ApplyMsg, num_to_apply)
 			for i := 0; i < num_to_apply; i++ {
@@ -422,20 +400,6 @@ func (rf *Raft) applyCommands() {
 			for i := 0; i < num_to_apply; i++ {
 				rf.applyCh <- messages[i]
 			}
-
-			// OLD CODE TO APPLY JUST ONE
-			// lastApplied += 1
-
-			// applyMsg := raftapi.ApplyMsg{}
-			// applyMsg.CommandValid = true
-			// applyMsg.Command = rf.logEntries[lastApplied]
-			// applyMsg.CommandIndex = lastApplied
-
-			// DebugPrint(dCommit, "S%d APPLYING %d", rf.me, lastApplied)
-			// rf.mu.Unlock()
-
-			// rf.applyCh <- applyMsg
-
 		} else {
 			rf.mu.Unlock()
 		}
@@ -446,7 +410,7 @@ func (rf *Raft) applyCommands() {
 
 func (rf *Raft) ticker() {
 	for !rf.killed() {
-		time.Sleep(10 * time.Millisecond) // always sleep
+		time.Sleep(10 * time.Millisecond)
 
 		rf.mu.Lock()
 
@@ -454,7 +418,6 @@ func (rf *Raft) ticker() {
 
 		if !rf.believesLeader && electionTimerRanOut && rf.votedFor == -1 {
 			rf.resetElectionTimer()
-			// DebugPrint(dElection, "S%d starting election at %d", rf.me, time.Now().UnixMilli())
 
 			// Increment term
 			rf.currentTerm += 1
@@ -536,11 +499,10 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 	}
 
 	if rf.currentTerm < args.Term {
-		rf.currentTerm = args.Term // was i not doing this before??? ummm???
-		// should always update their term right??
+		rf.currentTerm = args.Term
 	}
 
-	// if it was a heartbeat, just return now :p
+	// If it was a heartbeat, just return now
 	if isHeartbeat {
 		return
 	}
@@ -549,6 +511,22 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 	// Check if log contains a matching entry at args.PrevLogIndex
 	if rfLastLogIndex < args.PrevLogIndex || rf.logTermsReceived[args.PrevLogIndex] != args.PrevLogTerm {
 		reply.Success = false
+
+		// Include necessary info for backing-up optimization
+		if rfLastLogIndex < args.PrevLogIndex {
+			// Follower's log is too short
+			reply.XLen = len(rf.logEntries)
+		} else {
+			reply.XLen = -1
+			reply.XTerm = rf.logTermsReceived[args.PrevLogIndex]
+			XIndex := args.PrevLogIndex
+			for ; XIndex >= 0; XIndex-- {
+				if rf.logTermsReceived[XIndex] != reply.XTerm {
+					break
+				}
+			}
+			reply.XIndex = XIndex + 1
+		}
 		return
 	}
 
@@ -659,10 +637,31 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 					DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
 					rf.IssueAppendToPeer(server)
 				} else {
-					// Otherwise, decrement by 1 and resend the AppendEntries RPC
-					// TODO: optimize backing up strategy here
-					// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
-					rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
+					// Otherwise, back up with optimization (same code replicated below)
+					if reply.XLen != -1 {
+						// Follower's log was too short
+						rf.nextIndex[server] = reply.XLen
+						DebugPrint(dReceiveAppend, "1")
+					} else {
+						DebugPrint(dReceiveAppend, "2")
+						// Follower's log was long enough, but terms didn't match
+						leaderHasXTerm := false
+						lastXTermEntryIndex := -1
+						for i := 0; i < len(rf.logEntries); i++ {
+							if rf.logTermsReceived[i] == reply.XTerm {
+								leaderHasXTerm = true
+								lastXTermEntryIndex = i
+							}
+						}
+						if !leaderHasXTerm {
+							rf.nextIndex[server] = reply.XIndex
+						} else {
+							rf.nextIndex[server] = lastXTermEntryIndex
+						}
+					}
+					DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], server)
+					rf.nextIndex[server] = max(rf.nextIndex[server], 1)
+					// rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
 					rf.IssueAppendToPeer(server)
 				}
 			}
@@ -679,10 +678,31 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
 				rf.IssueAppendToPeer(server)
 			} else {
-				// Otherwise, decrement by 1 and resend the AppendEntries RPC
-				// TODO: optimize backing up strategy here
-				// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
-				rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
+				// Otherwise, back up with optimization (same code as above)
+				if reply.XLen != -1 {
+					// Follower's log was too short
+					rf.nextIndex[server] = reply.XLen
+					DebugPrint(dReceiveAppend, "1")
+				} else {
+					DebugPrint(dReceiveAppend, "2")
+					// Follower's log was long enough, but terms didn't match
+					leaderHasXTerm := false
+					lastXTermEntryIndex := -1
+					for i := 0; i < len(rf.logEntries); i++ {
+						if rf.logTermsReceived[i] == reply.XTerm {
+							leaderHasXTerm = true
+							lastXTermEntryIndex = i
+						}
+					}
+					if !leaderHasXTerm {
+						rf.nextIndex[server] = reply.XIndex
+					} else {
+						rf.nextIndex[server] = lastXTermEntryIndex
+					}
+				}
+				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], server)
+				rf.nextIndex[server] = max(rf.nextIndex[server], 1)
+				// rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
 				rf.IssueAppendToPeer(server)
 			}
 		}
@@ -691,12 +711,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	return ok
 }
 
-// persister is a place for this server to
-// save its persistent state, and also initially holds the most
-// recent saved state, if any. applyCh is a channel on which the
-// tester or service expects Raft to send ApplyMsg messages.
-// Make() must return quickly, so it should start goroutines
-// for any long-running work.
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *tester.Persister, applyCh chan raftapi.ApplyMsg) raftapi.Raft {
 	rf := &Raft{}
@@ -734,8 +748,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.sendHeartbeats()
 
 	rf.resetElectionTimer()
-
-	// rf.persist()
 
 	return rf
 }
