@@ -1279,6 +1279,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		}
 
 		if disconnect {
+			fmt.Println("1")
 			ts.g.DisconnectAll(victim)
 			tester.AnnotateConnection(ts.g.GetConnected())
 			ts.one(rand.Int(), servers-1, true)
@@ -1289,6 +1290,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			ts.one(rand.Int(), servers-1, true)
 		}
 
+		fmt.Println("2")
 		// perhaps send enough to get a snapshot
 		start := tester.GetAnnotateTimestamp()
 		nn := (SnapShotInterval / 2) + (rand.Int() % SnapShotInterval)
@@ -1305,6 +1307,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// TestSnapshotBasic3D().
 			ts.one(rand.Int(), servers, true)
 		} else {
+			fmt.Println("3")
 			ts.one(rand.Int(), servers-1, true)
 		}
 
@@ -1312,12 +1315,15 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			ts.t.Fatalf("Log size too large")
 		}
 		if disconnect {
+			fmt.Println("4")
 			// reconnect a follower, who maybe behind and
 			// needs to rceive a snapshot to catch up.
 			ts.g.ConnectOne(victim)
 			tester.AnnotateConnection(ts.g.GetConnected())
+			fmt.Println("5")
 			ts.one(rand.Int(), servers, true)
 			leader1 = ts.checkOneLeader()
+			fmt.Println("6")
 		}
 		if crash {
 			ts.restart(victim)

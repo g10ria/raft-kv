@@ -78,6 +78,19 @@ type AppendEntriesReply struct {
 	XLen    int
 }
 
+type InstallSnapshotArgs struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	Term    int
+	Success bool
+}
+
 // Return currentTerm and whether this server believes it is the leader
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
@@ -90,23 +103,26 @@ func (rf *Raft) GetState() (int, bool) {
 
 func (rf *Raft) persist() {
 	// Set up encoder
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
 
-	// Encode necessary data fields
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.votedFor)
-	e.Encode(rf.logEntries[rf.logStart:])       // Save compacted log
-	e.Encode(rf.logTermsReceived[rf.logStart:]) // Save compacted log
+	if !rf.killed() {
+		w := new(bytes.Buffer)
+		e := labgob.NewEncoder(w)
 
-	e.Encode(rf.snapshotLastIndex)
-	e.Encode(rf.snapshotLastTerm)
+		// Encode necessary data fields
+		e.Encode(rf.currentTerm)
+		e.Encode(rf.votedFor)
+		e.Encode(rf.logEntries[rf.logStart:])       // Save compacted log
+		e.Encode(rf.logTermsReceived[rf.logStart:]) // Save compacted log
 
-	// Save with persister
-	raftstate := w.Bytes()
-	rf.persister.Save(raftstate, rf.snapshot)
+		e.Encode(rf.snapshotLastIndex)
+		e.Encode(rf.snapshotLastTerm)
 
-	DebugPrint(dPersist, "S%d persisted", rf.me)
+		// Save with persister
+		raftstate := w.Bytes()
+		rf.persister.Save(raftstate, rf.snapshot)
+
+		// DebugPrint(dPersist, "S%d persisted", rf.me)
+	}
 }
 
 // restore previously persisted state.
@@ -153,8 +169,8 @@ func (rf *Raft) readPersist(data []byte, snapshot []byte) {
 			rf.currentTerm = currentTerm
 			rf.votedFor = votedFor
 
-			dummyLogs := make([]interface{}, snapshotLastIndex)
-			dummyTerms := make([]int, rf.snapshotLastIndex)
+			dummyLogs := make([]interface{}, snapshotLastIndex+1)
+			dummyTerms := make([]int, rf.snapshotLastIndex+1)
 			rf.logEntries = append(dummyLogs, logEntries...)
 			rf.logTermsReceived = append(dummyTerms, logTermsReceived...)
 
@@ -181,14 +197,47 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// If we have enough entries to actually hit that index and
 	// if we haven't already saved a more up-to-date snapshot
 	if index <= len(rf.logEntries) && index >= rf.logStart {
-		rf.logStart = index // REMOVE FOR INITIAL TESTING
+		DebugPrint(dPersist, "S%d snapshotting up to index %d", rf.me, index)
+
+		rf.logStart = index
 		// Save snapshot info
 		rf.snapshot = snapshot
 		rf.snapshotLastIndex = index
 		rf.snapshotLastTerm = rf.logTermsReceived[index]
+
+		DebugPrint(dPersist, "S%d old log length %d", rf.me, len(rf.logEntries))
+		// update log
+		rf.updateLogAfterSnapshot()
+
+		DebugPrint(dPersist, "S%d new log length %d", rf.me, len(rf.logEntries))
+
 		// And persist it
 		rf.persist()
 	}
+}
+
+// assumes snapshot, snapshotLastIndex, and snapshotLastTerm have all been set
+func (rf *Raft) updateLogAfterSnapshot() {
+	numEntriesInLog := len(rf.logEntries)
+	numEntriesInSnapshot := rf.snapshotLastIndex + 1
+
+	newLogEntries := make([]interface{}, numEntriesInSnapshot)
+	newLogTermsReceived := make([]int, numEntriesInSnapshot)
+	for i := range newLogTermsReceived {
+		newLogTermsReceived[i] = -1
+	}
+	newLogTermsReceived[rf.snapshotLastIndex] = rf.snapshotLastTerm // set the second to last logTermsReceived value
+
+	if numEntriesInLog > numEntriesInSnapshot { // check if it's actually a prefix...?
+		// Only re-append the rest of the log to the newly created dummy log
+		// if the snapshot was a prefix of the old log
+		newLogEntries = append(newLogEntries, rf.logEntries[rf.snapshotLastIndex+1:]...)
+		newLogTermsReceived = append(newLogTermsReceived, rf.logTermsReceived[rf.snapshotLastIndex+1:]...)
+	}
+	rf.logEntries = newLogEntries
+	rf.logTermsReceived = newLogTermsReceived
+
+	// DebugPrint(dPersist, "S%d terms are now %v", rf.me, rf.logTermsReceived)
 }
 
 // Resets the election timer to the current time + a random offset
@@ -309,20 +358,111 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-func (rf *Raft) IssueAppendToPeer(peer int) { // move this into the big function?
-	args := AppendEntriesArgs{}
-	args.Term = rf.currentTerm
-	args.LeaderId = rf.me
+func (rf *Raft) ReceiveInstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	reply.Term = rf.currentTerm
+
+	if args.Term < rf.currentTerm {
+		return
+	}
+
+	reply.Success = true
+
+	// maybe more stuff to do here? idk
+	if args.LastIncludedIndex > rf.snapshotLastIndex {
+		// Install snapshot if it's more up to date than current snapshot
+
+		rf.snapshotLastIndex = args.LastIncludedIndex
+		rf.snapshotLastTerm = args.LastIncludedTerm
+		rf.snapshot = args.Data
+
+		rf.logStart = rf.snapshotLastIndex + 1
+
+		rf.updateLogAfterSnapshot()
+	}
+}
+
+func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	ok := rf.peers[server].Call("Raft.ReceiveInstallSnapshot", args, reply)
+
+	if ok {
+		// TODO: make the debug topics like dSnapshot or something lol
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+
+		if reply.Term > rf.currentTerm && rf.believesLeader {
+			// We're an outdated leader :( demote!
+			rf.believesLeader = false
+			rf.currentTerm = reply.Term
+
+			// DebugPrint(dPersist, "S%d 10", rf.me)
+			rf.persist()
+
+			DebugPrint(dReceiveAppend, "S%d (term %d) received INSTALL from (%d term %d)", rf.me, rf.currentTerm, server, reply.Term)
+			DebugPrint(dLeader, "S%d demotes for term %d", rf.me, rf.currentTerm)
+		} else if reply.Term <= rf.currentTerm && rf.believesLeader {
+			// Ok, otherwise process the install snapshot response
+
+			if reply.Success {
+				// The snapshot was installed successfully!
+				DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED install snapshot (until %d) to %d", rf.me, rf.currentTerm, args.LastIncludedIndex, server)
+
+				// Update nextIndex and matchIndex for this server. Use max to avoid late-arriving reponses from overwriting faster ones
+				rf.nextIndex[server] = max(args.LastIncludedIndex+1, rf.nextIndex[server])
+				prevMatchIndex := rf.matchIndex[server]
+				rf.matchIndex[server] = max(args.LastIncludedIndex, rf.matchIndex[server])
+
+				// Attempt to update the commit index, if server's match index was updated
+				if prevMatchIndex < rf.matchIndex[server] {
+					rf.attemptToUpdateCommitIndex()
+				}
+
+				// continue issuing appends to the server, we might not be done!
+				// rf.IssueAppendToPeer(server)
+			} else {
+				// The snapshot was not successfully installed; just send it again
+				rf.IssueAppendToPeer(server)
+			}
+		}
+	} else { // didn't even receive a response
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+		// something failed
+		if rf.believesLeader && !rf.killed() {
+			// The snapshot was not successfully installed; just send it again
+			rf.IssueAppendToPeer(server)
+		}
+	}
+
+	return ok
+}
+
+func (rf *Raft) IssueAppendToPeer(peer int) {
 	nextIndexToSend := rf.nextIndex[peer]
 	lastLogIndex := len(rf.logEntries) - 1
 
-	args.LeaderCommit = min(rf.commitIndex, rf.matchIndex[peer])
-
 	if nextIndexToSend < rf.logStart {
-		// Need to send a snapshot because the nextIndexToSend is before logStart
-		DebugPrint(dSendAppend, "S%d sending snapshot to %d", rf.me, peer)
+		DebugPrint(dSendAppend, "S%d sending snapshot to %d up to index %d", rf.me, peer, rf.snapshotLastIndex)
+
+		args := InstallSnapshotArgs{}
+		args.Term = rf.currentTerm
+		args.LeaderId = rf.me
+		args.LastIncludedIndex = rf.snapshotLastIndex
+		args.LastIncludedTerm = rf.snapshotLastTerm
+		args.Data = rf.snapshot
+		reply := InstallSnapshotReply{}
+
+		go rf.sendInstallSnapshot(peer, &args, &reply)
+
 	} else if nextIndexToSend <= lastLogIndex {
+		args := AppendEntriesArgs{}
+		args.Term = rf.currentTerm
+		args.LeaderId = rf.me
+
+		args.LeaderCommit = min(rf.commitIndex, rf.matchIndex[peer])
+
 		args.PrevLogIndex = nextIndexToSend - 1
 		args.PrevLogTerm = rf.logTermsReceived[args.PrevLogIndex]
 
@@ -332,13 +472,13 @@ func (rf *Raft) IssueAppendToPeer(peer int) { // move this into the big function
 		if nextIndexToSend != 1 {
 			DebugPrint(dSendAppend, "S%d (term %d) sending append (from %d to %d) to %d", rf.me, rf.currentTerm, nextIndexToSend, lastLogIndex, peer)
 		}
+
+		reply := AppendEntriesReply{}
+		go rf.sendAppendEntries(peer, &args, &reply)
 	} else {
 		// This should never happen
 		DebugPrint(dError, "S%d has nextIndex = %d for S%d where lastLogIndex = %d", rf.me, nextIndexToSend, peer, lastLogIndex)
 	}
-
-	reply := AppendEntriesReply{}
-	go rf.sendAppendEntries(peer, &args, &reply)
 }
 
 func (rf *Raft) sendHeartbeats() {
@@ -422,10 +562,24 @@ func (rf *Raft) applyCommands() {
 	for !rf.killed() {
 		rf.mu.Lock()
 
-		if rf.commitIndex > lastApplied {
-			// Applies up to 5 commits at once
+		if rf.snapshotLastIndex > lastApplied {
+			// send a snapshot on the channel
+			applyMsg := raftapi.ApplyMsg{}
+			applyMsg.SnapshotValid = true
+			applyMsg.Snapshot = rf.snapshot
+			applyMsg.SnapshotIndex = rf.snapshotLastIndex
+			applyMsg.SnapshotTerm = rf.snapshotLastTerm
+
+			lastApplied = rf.snapshotLastIndex
+
+			rf.mu.Unlock()
+			rf.applyCh <- applyMsg
+
+		} else if rf.commitIndex > lastApplied {
+			// Applies up to 10 commits at once
 			num_to_apply := min(10, rf.commitIndex-lastApplied)
 			messages := make([]raftapi.ApplyMsg, num_to_apply)
+
 			for i := 0; i < num_to_apply; i++ {
 				lastApplied += 1
 
@@ -434,10 +588,11 @@ func (rf *Raft) applyCommands() {
 				applyMsg.Command = rf.logEntries[lastApplied]
 				applyMsg.CommandIndex = lastApplied
 
-				DebugPrint(dCommit, "S%d APPLYING %d", rf.me, lastApplied)
+				DebugPrint(dCommit, "S%d APPLYING %d with value %d", rf.me, lastApplied, applyMsg.Command)
 
 				messages[i] = applyMsg
 			}
+
 			rf.mu.Unlock()
 			for i := 0; i < num_to_apply; i++ {
 				rf.applyCh <- messages[i]
@@ -685,7 +840,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 						rf.nextIndex[server] = reply.XLen
 						DebugPrint(dReceiveAppend, "1")
 					} else {
-						DebugPrint(dReceiveAppend, "2")
+						DebugPrint(dReceiveAppend, "2 %d", reply.XTerm)
 						// Follower's log was long enough, but terms didn't match
 						leaderHasXTerm := false
 						lastXTermEntryIndex := -1
@@ -720,31 +875,32 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
 				rf.IssueAppendToPeer(server)
 			} else {
+				// NOTE: removing optimization here
 				// Otherwise, back up with optimization (same code as above)
-				if reply.XLen != -1 {
-					// Follower's log was too short
-					rf.nextIndex[server] = reply.XLen
-					DebugPrint(dReceiveAppend, "1")
-				} else {
-					DebugPrint(dReceiveAppend, "2")
-					// Follower's log was long enough, but terms didn't match
-					leaderHasXTerm := false
-					lastXTermEntryIndex := -1
-					for i := 0; i < len(rf.logEntries); i++ {
-						if rf.logTermsReceived[i] == reply.XTerm {
-							leaderHasXTerm = true
-							lastXTermEntryIndex = i
-						}
-					}
-					if !leaderHasXTerm {
-						rf.nextIndex[server] = reply.XIndex
-					} else {
-						rf.nextIndex[server] = lastXTermEntryIndex
-					}
-				}
-				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], server)
-				rf.nextIndex[server] = max(rf.nextIndex[server], 1)
-				// rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
+				// if reply.XLen != -1 {
+				// 	// Follower's log was too short
+				// 	rf.nextIndex[server] = reply.XLen
+				// 	DebugPrint(dReceiveAppend, "1")
+				// } else {
+				// 	DebugPrint(dReceiveAppend, "2")
+				// 	// Follower's log was long enough, but terms didn't match
+				// 	leaderHasXTerm := false
+				// 	lastXTermEntryIndex := -1
+				// 	for i := 0; i < len(rf.logEntries); i++ {
+				// 		if rf.logTermsReceived[i] == reply.XTerm {
+				// 			leaderHasXTerm = true
+				// 			lastXTermEntryIndex = i
+				// 		}
+				// 	}
+				// 	if !leaderHasXTerm {
+				// 		rf.nextIndex[server] = reply.XIndex
+				// 	} else {
+				// 		rf.nextIndex[server] = lastXTermEntryIndex
+				// 	}
+				// }
+				// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], server)
+				// rf.nextIndex[server] = max(rf.nextIndex[server], 1)
+				rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
 				rf.IssueAppendToPeer(server)
 			}
 		}
