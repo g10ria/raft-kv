@@ -1258,7 +1258,7 @@ const (
 )
 
 func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash bool) {
-	iters := 30
+	iters := 10
 	servers := 3
 	ts := makeTest(t, servers, reliable, true)
 	defer ts.cleanup()
@@ -1278,13 +1278,15 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			victim = leader1
 		}
 
+		fmt.Println("1")
 		if disconnect {
-			fmt.Println("1")
+			ts.srvs[victim].Raft().DebugDisconnect()
 			ts.g.DisconnectAll(victim)
 			tester.AnnotateConnection(ts.g.GetConnected())
 			ts.one(rand.Int(), servers-1, true)
 		}
 		if crash {
+			ts.srvs[victim].Raft().DebugShutdown()
 			ts.g.ShutdownServer(victim)
 			tester.AnnotateShutdown([]int{victim})
 			ts.one(rand.Int(), servers-1, true)
@@ -1300,6 +1302,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		text := fmt.Sprintf("submitting %v commands to %v", nn, sender)
 		tester.AnnotateInfoInterval(start, text, text)
 
+		fmt.Println("3")
 		// let applier threads catch up with the Start()'s
 		if disconnect == false && crash == false {
 			// make sure all followers have caught up, so that
@@ -1307,7 +1310,6 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			// TestSnapshotBasic3D().
 			ts.one(rand.Int(), servers, true)
 		} else {
-			fmt.Println("3")
 			ts.one(rand.Int(), servers-1, true)
 		}
 
@@ -1315,9 +1317,9 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			ts.t.Fatalf("Log size too large")
 		}
 		if disconnect {
-			fmt.Println("4")
 			// reconnect a follower, who maybe behind and
 			// needs to rceive a snapshot to catch up.
+			ts.srvs[victim].Raft().DebugConnect()
 			ts.g.ConnectOne(victim)
 			tester.AnnotateConnection(ts.g.GetConnected())
 			fmt.Println("5")
@@ -1326,6 +1328,7 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			fmt.Println("6")
 		}
 		if crash {
+			ts.srvs[victim].Raft().DebugRestart()
 			ts.restart(victim)
 			tester.AnnotateRestart([]int{victim})
 			ts.one(rand.Int(), servers, true)

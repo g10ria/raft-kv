@@ -17,6 +17,8 @@ type Raft interface {
 	// Added for debugging
 	DebugDisconnect()
 	DebugConnect()
+	DebugShutdown()
+	DebugRestart()
 
 	// For the tester to indicate to your code that is should cleanup
 	// any long-running go routines.

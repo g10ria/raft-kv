@@ -197,7 +197,7 @@ func (sg *ServerGrp) disconnect(i int, from []int) {
 }
 
 func (sg *ServerGrp) DisconnectAll(i int) {
-	fmt.Printf("\n\nDISCONNECTING %d\n\n", i)
+	// fmt.Printf("\n\nDISCONNECTING %d\n\n", i)
 	sg.disconnect(i, sg.all())
 }
 

@@ -19,6 +19,14 @@ func (rf *Raft) DebugDisconnect() {
 	DebugPrint(dLeader, "S%d DISCONNECTED", rf.me)
 }
 
+func (rf *Raft) DebugShutdown() {
+	DebugPrint(dLeader, "S%d SHUTDOWN", rf.me)
+}
+
+func (rf *Raft) DebugRestart() {
+	DebugPrint(dLeader, "S%d RESTART", rf.me)
+}
+
 func (rf *Raft) DebugConnect() {
 	DebugPrint(dLeader, "S%d CONNECTED", rf.me)
 }
@@ -410,9 +418,11 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 				DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED install snapshot (until %d) to %d", rf.me, rf.currentTerm, args.LastIncludedIndex, server)
 
 				// Update nextIndex and matchIndex for this server. Use max to avoid late-arriving reponses from overwriting faster ones
-				rf.nextIndex[server] = max(args.LastIncludedIndex+1, rf.nextIndex[server])
 				prevMatchIndex := rf.matchIndex[server]
 				rf.matchIndex[server] = max(args.LastIncludedIndex, rf.matchIndex[server])
+				rf.nextIndex[server] = max(rf.matchIndex[server]+1, rf.nextIndex[server])
+
+				DebugPrint(dReceiveAppend, "S%d (term %d) updated %d status to next=%d match=%d", rf.me, rf.currentTerm, server, rf.nextIndex[server], rf.matchIndex[server])
 
 				// Attempt to update the commit index, if server's match index was updated
 				if prevMatchIndex < rf.matchIndex[server] {
@@ -422,6 +432,7 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 				// continue issuing appends to the server, we might not be done!
 				// rf.IssueAppendToPeer(server)
 			} else {
+				DebugPrint(dReceiveAppend, "S%d (term %d) FAILED install snapshot (until %d) to %d, trying again", rf.me, rf.currentTerm, args.LastIncludedIndex, server)
 				// The snapshot was not successfully installed; just send it again
 				rf.IssueAppendToPeer(server)
 			}
@@ -531,12 +542,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		rf.logEntries = append(rf.logEntries, command)
 		rf.logTermsReceived = append(rf.logTermsReceived, rf.currentTerm)
+		DebugPrint(dLeader, "S%d received index %d", rf.me, len(rf.logEntries)-1)
 		for peer, _ := range rf.peers {
 			if peer != rf.me {
 				rf.IssueAppendToPeer(peer)
 			}
 		}
-		DebugPrint(dLeader, "S%d received index %d", rf.me, len(rf.logEntries)-1)
 		rf.persist()
 	}
 
@@ -704,6 +715,9 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 		return
 	}
 
+	// jellyfish
+	// DebugPrint(dReplyAppend, "S%d (term %d) received APPEND %d-%d from %d (term %d)", rf.me, rf.currentTerm, args.PrevLogIndex+1, args.PrevLogIndex+len(args.LogEntries), args.LeaderId, args.Term)
+
 	rfLastLogIndex := len(rf.logEntries) - 1
 	// Check if log contains a matching entry at args.PrevLogIndex
 	if rfLastLogIndex < args.PrevLogIndex || rf.logTermsReceived[args.PrevLogIndex] != args.PrevLogTerm {
@@ -815,7 +829,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 			if reply.Success {
 				// The logs were appended successfully!
-				DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
+				// DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
 
 				// Update nextIndex and matchIndex for this server. Use max to avoid late-arriving reponses from overwriting faster ones
 				rf.nextIndex[server] = max(args.PrevLogIndex+len(args.LogEntries)+1, rf.nextIndex[server])
@@ -838,9 +852,9 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 					if reply.XLen != -1 {
 						// Follower's log was too short
 						rf.nextIndex[server] = reply.XLen
-						DebugPrint(dReceiveAppend, "1")
+						DebugPrint(dReceiveAppend, "S%d 1", rf.me)
 					} else {
-						DebugPrint(dReceiveAppend, "2 %d", reply.XTerm)
+						DebugPrint(dReceiveAppend, "S%d 2 %d", rf.me, reply.XTerm)
 						// Follower's log was long enough, but terms didn't match
 						leaderHasXTerm := false
 						lastXTermEntryIndex := -1
@@ -868,8 +882,23 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		defer rf.mu.Unlock()
 		// something failed
 		if rf.believesLeader && !rf.killed() {
-			// basically - the disconnected server demoted but the recursive issueAppends are still going because of
-			// this else clause!
+
+			// check the match index to see if this rpc is still relevant
+			// lowkey add this check up above too?
+
+			serverMatch := rf.matchIndex[server]
+			attemptedMatch := args.PrevLogIndex + len(args.LogEntries)
+
+			DebugPrint(dReceiveAppend, "S%d (term %d) didn't get reply to append %d-%d to %d, match=%d attempt=%d",
+				rf.me, rf.currentTerm, args.PrevLogIndex+1, args.PrevLogIndex+len(args.LogEntries), server,
+				serverMatch, attemptedMatch)
+
+			if serverMatch >= attemptedMatch {
+				return ok
+			}
+
+			DebugPrint(dReceiveAppend, "S%d (^ so we're trying again)", rf.me)
+
 			if rf.nextIndex[server] == 1 {
 				// If we've already backed up to the earliest log, just give up entirely
 				DebugPrint(dReceiveAppend, "S%d (term %d) GIVING UP append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
@@ -900,7 +929,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				// }
 				// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], server)
 				// rf.nextIndex[server] = max(rf.nextIndex[server], 1)
-				rf.nextIndex[server] = max(rf.nextIndex[server]-25, 1)
+				rf.nextIndex[server] = max(rf.nextIndex[server]-1, 1)
+				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDIN' append (from %d, match %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], rf.matchIndex[server], server)
 				rf.IssueAppendToPeer(server)
 			}
 		}
