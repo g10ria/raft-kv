@@ -178,9 +178,12 @@ func (rf *Raft) readPersist(data []byte, snapshot []byte) {
 			rf.votedFor = votedFor
 
 			dummyLogs := make([]interface{}, snapshotLastIndex+1)
-			dummyTerms := make([]int, rf.snapshotLastIndex+1)
+			dummyTerms := make([]int, snapshotLastIndex+1)
 			rf.logEntries = append(dummyLogs, logEntries...)
 			rf.logTermsReceived = append(dummyTerms, logTermsReceived...)
+
+			DebugPrint(dPersist, "S%d snapshot info: last index was %d, plus log entries %d-%d. read %d log entries from snapshot..",
+				rf.me, snapshotLastIndex, snapshotLastIndex+1, len(rf.logEntries)-1, len(logEntries))
 
 			// copy in the term, even though the corresponding entry is empty (saved in the snapshot)
 			// since we use this for various checks
@@ -207,7 +210,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	if index <= len(rf.logEntries) && index >= rf.logStart {
 		DebugPrint(dPersist, "S%d snapshotting up to index %d", rf.me, index)
 
-		rf.logStart = index
+		rf.logStart = index + 1
 		// Save snapshot info
 		rf.snapshot = snapshot
 		rf.snapshotLastIndex = index
@@ -250,7 +253,7 @@ func (rf *Raft) updateLogAfterSnapshot() {
 
 // Resets the election timer to the current time + a random offset
 func (rf *Raft) resetElectionTimer() {
-	ms := 1500 + (rand.Int63() % 650)
+	ms := 1400 + (rand.Int63() % 700)
 	now := time.Now()
 	candidateTimer := now.Add(time.Duration(ms) * time.Millisecond)
 
@@ -337,31 +340,35 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// If we are a candidate, the vote was granted, and the vote was for the term we're currently in, increment numVotesReceived
-	if !rf.believesLeader && reply.VoteGranted && args.Term == rf.currentTerm {
-		rf.numVotesReceived += 1
+	if ok {
+		// If we are a candidate, the vote was granted, and the vote was for the term we're currently in, increment numVotesReceived
+		if !rf.believesLeader && reply.VoteGranted && args.Term == rf.currentTerm {
+			rf.numVotesReceived += 1
 
-		// If we have enough votes to win, become leader
-		if rf.numVotesReceived >= rf.votesNeededToWin {
-			rf.believesLeader = true
-			DebugPrint(dLeader, "S%d becomes leader for term %d", rf.me, reply.Term)
+			// If we have enough votes to win, become leader
+			if rf.numVotesReceived >= rf.votesNeededToWin {
+				rf.believesLeader = true
+				DebugPrint(dLeader, "S%d becomes leader for term %d", rf.me, reply.Term)
 
-			// Initialize nextIndex to log[-1] and matchIndex to 0
-			for i := 0; i < len(rf.peers); i++ {
-				if i != rf.me {
-					rf.nextIndex[i] = max(len(rf.logEntries), 1)
-					rf.matchIndex[i] = 0
+				// Initialize nextIndex to log[-1] and matchIndex to 0
+				for i := 0; i < len(rf.peers); i++ {
+					if i != rf.me {
+						rf.nextIndex[i] = max(len(rf.logEntries), 1)
+						rf.matchIndex[i] = 0
+					}
 				}
 			}
-		}
-	} else if reply.Term > rf.currentTerm {
-		// Otherwise, if the reply is telling us our term is behind, update our term
-		// No need to reset numVotesReceived because that gets set to 0 when a new election starts
-		DebugPrint(dTerm, "S%d updates term from %d to %d", rf.me, rf.currentTerm, reply.Term)
-		rf.currentTerm = reply.Term
+		} else if reply.Term > rf.currentTerm {
+			// Otherwise, if the reply is telling us our term is behind, update our term
+			// No need to reset numVotesReceived because that gets set to 0 when a new election starts
+			DebugPrint(dTerm, "S%d updates term from %d to %d", rf.me, rf.currentTerm, reply.Term)
+			rf.currentTerm = reply.Term
 
-		// DebugPrint(dPersist, "S%d 2", rf.me)
-		rf.persist()
+			// DebugPrint(dPersist, "S%d 2", rf.me)
+			rf.persist()
+		}
+	} else {
+		// maybe re-issue the request...? idk if this will just break everything lol
 	}
 	return ok
 }
@@ -605,8 +612,18 @@ func (rf *Raft) applyCommands() {
 			}
 
 			rf.mu.Unlock()
+
+			keep_applying := false
 			for i := 0; i < num_to_apply; i++ {
-				rf.applyCh <- messages[i]
+				rf.mu.Lock()
+				keep_applying = !rf.killed()
+				rf.mu.Unlock()
+
+				if keep_applying {
+					rf.applyCh <- messages[i]
+				} else {
+					break
+				}
 			}
 		} else {
 			rf.mu.Unlock()
@@ -808,6 +825,8 @@ func (rf *Raft) attemptToUpdateCommitIndex() {
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	// DebugPrint(dLeader, "S9 args: %+v", args)
+	// DebugPrint(dLeader, "S9 reply (before): %+v", reply)
 	ok := rf.peers[server].Call("Raft.ReceiveAppendEntries", args, reply)
 
 	if ok {
@@ -832,6 +851,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				// DebugPrint(dReceiveAppend, "S%d (term %d) SUCCEEDED append (until %d) to %d", rf.me, rf.currentTerm, args.PrevLogIndex+len(args.LogEntries), server)
 
 				// Update nextIndex and matchIndex for this server. Use max to avoid late-arriving reponses from overwriting faster ones
+				// NOTE: need to fix this maybe? unsure? jellyfish
 				rf.nextIndex[server] = max(args.PrevLogIndex+len(args.LogEntries)+1, rf.nextIndex[server])
 				prevMatchIndex := rf.matchIndex[server]
 				rf.matchIndex[server] = max(args.PrevLogIndex+len(args.LogEntries), rf.matchIndex[server])
@@ -930,6 +950,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDING append (until %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], server)
 				// rf.nextIndex[server] = max(rf.nextIndex[server], 1)
 				rf.nextIndex[server] = max(rf.nextIndex[server]-1, 1)
+				rf.nextIndex[server] = max(rf.nextIndex[server], rf.matchIndex[server]+1)
 				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDIN' append (from %d, match %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], rf.matchIndex[server], server)
 				rf.IssueAppendToPeer(server)
 			}
@@ -950,6 +971,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Initialize raft server here
 	// Start with one (empty) entry in the log
 	rf.logEntries = make([]interface{}, 1)
+	rf.logEntries[0] = 420
 	rf.logTermsReceived = make([]int, 1)
 	rf.currentTerm = 0
 	rf.votedFor = -1

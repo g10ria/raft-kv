@@ -1258,7 +1258,7 @@ const (
 )
 
 func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash bool) {
-	iters := 10
+	iters := 30
 	servers := 3
 	ts := makeTest(t, servers, reliable, true)
 	defer ts.cleanup()
@@ -1328,8 +1328,8 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			fmt.Println("6")
 		}
 		if crash {
-			ts.srvs[victim].Raft().DebugRestart()
 			ts.restart(victim)
+			ts.srvs[victim].Raft().DebugRestart()
 			tester.AnnotateRestart([]int{victim})
 			ts.one(rand.Int(), servers, true)
 			leader1 = ts.checkOneLeader()
