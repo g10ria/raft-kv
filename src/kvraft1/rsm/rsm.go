@@ -1,25 +1,35 @@
 package rsm
 
 import (
+	"fmt"
+	"math/rand"
 	"sync"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labrpc"
-	"6.5840/raft1"
+	raft "6.5840/raft1"
 	"6.5840/raftapi"
-	"6.5840/tester1"
-
+	tester "6.5840/tester1"
 )
 
 var useRaftStateMachine bool // to plug in another raft besided raft1
 
-
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	Me  int
+	Id  int
+	Req any
 }
 
+type OpInfo struct {
+	Index int
+	Term  int
+}
+
+type RaftStatus struct {
+	Term   int
+	Leader bool
+}
 
 // A server (i.e., ../server.go) that wants to replicate itself calls
 // MakeRSM and must implement the StateMachine interface.  This
@@ -41,6 +51,9 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
+	waiting_submits             map[int]chan any
+	waiting_ops                 map[int]OpInfo
+	most_recent_committed_index int
 }
 
 // servers[] contains the ports of the set of
@@ -60,14 +73,18 @@ type RSM struct {
 // any long-running work.
 func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, maxraftstate int, sm StateMachine) *RSM {
 	rsm := &RSM{
-		me:           me,
-		maxraftstate: maxraftstate,
-		applyCh:      make(chan raftapi.ApplyMsg),
-		sm:           sm,
+		me:              me,
+		maxraftstate:    maxraftstate,
+		applyCh:         make(chan raftapi.ApplyMsg),
+		sm:              sm,
+		waiting_submits: make(map[int]chan any),
+		waiting_ops:     make(map[int]OpInfo),
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+	go rsm.ListenForCommits(me, rsm.applyCh)
+	go rsm.PruneWaitingSubmits()
 	return rsm
 }
 
@@ -75,16 +92,86 @@ func (rsm *RSM) Raft() raftapi.Raft {
 	return rsm.rf
 }
 
+func (rsm *RSM) PruneWaitingSubmits() {
+	for {
+		rsm.mu.Lock()
+
+		term, _ := rsm.rf.GetState()
+		for key, waiting_op := range rsm.waiting_ops {
+			if waiting_op.Index <= rsm.most_recent_committed_index || waiting_op.Term < term {
+				fmt.Printf("\t%d PRUNING op\n", rsm.me)
+				rsm.waiting_submits[key] <- -1
+				rsm.ClearWaitingSubmit(key)
+			}
+		}
+
+		rsm.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (rsm *RSM) ListenForCommits(me int, ch chan raftapi.ApplyMsg) {
+	for commit := range ch {
+		op := commit.Command.(Op)
+		op_index := commit.CommandIndex
+		op_term := commit.CommandTerm
+		res := rsm.sm.DoOp(op.Req) // do the operation
+
+		rsm.mu.Lock()
+		fmt.Printf("\t%d processing op %d with index %d term %d\n", rsm.me, op.Id, op_index, op_term)
+
+		submit_ch, ok2 := rsm.waiting_submits[op.Id]
+		if ok2 && submit_ch != nil {
+			submit_ch <- res
+			rsm.ClearWaitingSubmit(op.Id)
+		}
+
+		rsm.most_recent_committed_index = op_index
+
+		rsm.mu.Unlock()
+	}
+	fmt.Printf("%d applyCh closed\n", rsm.me)
+}
+
+func (rsm *RSM) ClearWaitingSubmit(id int) {
+	delete(rsm.waiting_submits, id) // remove value from map
+	delete(rsm.waiting_ops, id)
+}
 
 // Submit a command to Raft, and wait for it to be committed.  It
 // should return ErrWrongLeader if client should find new leader and
 // try again.
 func (rsm *RSM) Submit(req any) (rpc.Err, any) {
+	rsm.mu.Lock()
+	op_id := rand.Int()
+	op := Op{
+		Me:  rsm.me,
+		Id:  op_id,
+		Req: req,
+	}
+	index, term, isLeader := rsm.rf.Start(op)
 
-	// Submit creates an Op structure to run a command through Raft;
-	// for example: op := Op{Me: rsm.me, Id: id, Req: req}, where req
-	// is the argument to Submit and id is a unique id for the op.
+	op_info := OpInfo{
+		Index: index,
+		Term:  term,
+	}
 
-	// your code here
-	return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+	wait_channel := make(chan any)
+	if isLeader {
+		fmt.Printf("%d submitting op %d\n", rsm.me, op_id)
+		rsm.waiting_submits[op_id] = wait_channel
+		rsm.waiting_ops[op_id] = op_info
+	}
+	rsm.mu.Unlock()
+
+	if !isLeader {
+		return rpc.ErrWrongLeader, nil
+	}
+
+	res := <-wait_channel
+	if res == -1 {
+		return rpc.ErrWrongLeader, nil
+	}
+	// fmt.Printf("\t\t\t%d RETURNING op %d\n", rsm.me, op.Id)
+	return rpc.OK, res
 }

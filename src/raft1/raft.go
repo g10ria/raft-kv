@@ -2,6 +2,7 @@ package raft
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"slices"
 	"sync"
@@ -567,6 +568,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	DebugPrint(dLeader, "S%d KILLED", rf.me)
+	rf.mu.Lock()
+	close(rf.applyCh)
+	rf.mu.Unlock()
 }
 
 func (rf *Raft) killed() bool {
@@ -605,8 +609,10 @@ func (rf *Raft) applyCommands() {
 				applyMsg.CommandValid = true
 				applyMsg.Command = rf.logEntries[lastApplied]
 				applyMsg.CommandIndex = lastApplied
+				applyMsg.CommandTerm = rf.logTermsReceived[lastApplied]
 
 				DebugPrint(dCommit, "S%d APPLYING %d with value %d", rf.me, lastApplied, applyMsg.Command)
+				fmt.Printf("S%d APPLYING %d with value %d\n", rf.me, lastApplied, applyMsg.Command)
 
 				messages[i] = applyMsg
 			}
@@ -617,13 +623,16 @@ func (rf *Raft) applyCommands() {
 			for i := 0; i < num_to_apply; i++ {
 				rf.mu.Lock()
 				keep_applying = !rf.killed()
-				rf.mu.Unlock()
-
+				// getting killed here?
 				if keep_applying {
+					fmt.Printf("%d applying %d\n", rf.me, messages[i].Command)
 					rf.applyCh <- messages[i]
 				} else {
+					fmt.Printf("%d stop applying at %d\n", rf.me, messages[i].Command)
+					rf.mu.Unlock()
 					break
 				}
+				rf.mu.Unlock()
 			}
 		} else {
 			rf.mu.Unlock()
