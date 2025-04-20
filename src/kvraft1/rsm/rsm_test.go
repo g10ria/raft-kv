@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"6.5840/kvsrv1/rpc"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 // test that each server executes increments and updates its counter.
@@ -287,6 +287,8 @@ func TestRestartSubmit4A(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
+	fmt.Printf("GOT HERE1\n")
+
 	// Submit many Null's concurrently
 	text := fmt.Sprintf("concurrently submitting %v Null", NSUBMIT)
 	tester.AnnotateInfo(text, text)
@@ -304,11 +306,16 @@ func TestRestartSubmit4A(t *testing.T) {
 		done <- struct{}{}
 	}()
 
+	fmt.Printf("GOT HERE2\n")
+
 	// give some time to submit
 	time.Sleep(20 * time.Millisecond)
 
+	fmt.Printf("SHUTTING THEM DOWN... \n")
 	ts.Group(Gid).Shutdown()
 	tester.AnnotateShutdownAll()
+
+	fmt.Printf("SHUT DOWN ALL SERVERS\n")
 
 	select {
 	case <-done:
@@ -318,6 +325,7 @@ func TestRestartSubmit4A(t *testing.T) {
 		ts.Fatalf(err)
 	}
 
+	fmt.Printf("STARTING SERVERS\n")
 	ts.Group(Gid).StartServers()
 	tester.AnnotateRestartAll()
 

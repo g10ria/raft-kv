@@ -77,6 +77,8 @@ type AppendEntriesArgs struct {
 	LogEntries       []interface{}
 	LogTermsReceived []int
 	LeaderCommit     int
+	LogLength        int
+	CommitIndexFr    int
 }
 
 type AppendEntriesReply struct {
@@ -113,7 +115,7 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Set up encoder
 
-	if !rf.killed() {
+	if !rf.Killed() {
 		w := new(bytes.Buffer)
 		e := labgob.NewEncoder(w)
 
@@ -449,7 +451,7 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 		// something failed
-		if rf.believesLeader && !rf.killed() {
+		if rf.believesLeader && !rf.Killed() {
 			// The snapshot was not successfully installed; just send it again
 			rf.IssueAppendToPeer(server)
 		}
@@ -501,7 +503,7 @@ func (rf *Raft) IssueAppendToPeer(peer int) {
 }
 
 func (rf *Raft) sendHeartbeats() {
-	for !rf.killed() {
+	for !rf.Killed() {
 		rf.mu.Lock()
 
 		if rf.believesLeader {
@@ -514,6 +516,9 @@ func (rf *Raft) sendHeartbeats() {
 					args.LogEntries = make([]interface{}, 0)
 					args.LeaderCommit = min(rf.commitIndex, rf.matchIndex[index])
 					args.LeaderId = rf.me
+
+					args.LogLength = len(rf.logEntries)
+					args.CommitIndexFr = rf.commitIndex
 
 					reply := AppendEntriesReply{}
 					go rf.sendAppendEntriesHeartbeat(index, &args, &reply)
@@ -566,14 +571,15 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft) Kill() {
+	rf.mu.Lock()
 	atomic.StoreInt32(&rf.dead, 1)
 	DebugPrint(dLeader, "S%d KILLED", rf.me)
-	rf.mu.Lock()
+	fmt.Printf("S%d KILLED\n", rf.me)
 	close(rf.applyCh)
 	rf.mu.Unlock()
 }
 
-func (rf *Raft) killed() bool {
+func (rf *Raft) Killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
@@ -581,7 +587,7 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) applyCommands() {
 	lastApplied := 0
 
-	for !rf.killed() {
+	for !rf.Killed() {
 		rf.mu.Lock()
 
 		if rf.snapshotLastIndex > lastApplied {
@@ -612,7 +618,7 @@ func (rf *Raft) applyCommands() {
 				applyMsg.CommandTerm = rf.logTermsReceived[lastApplied]
 
 				DebugPrint(dCommit, "S%d APPLYING %d with value %d", rf.me, lastApplied, applyMsg.Command)
-				fmt.Printf("S%d APPLYING %d with value %d\n", rf.me, lastApplied, applyMsg.Command)
+				// fmt.Printf("S%d APPLYING %d with value %d\n", rf.me, lastApplied, applyMsg.Command)
 
 				messages[i] = applyMsg
 			}
@@ -622,10 +628,10 @@ func (rf *Raft) applyCommands() {
 			keep_applying := false
 			for i := 0; i < num_to_apply; i++ {
 				rf.mu.Lock()
-				keep_applying = !rf.killed()
+				keep_applying = !rf.Killed()
 				// getting killed here?
 				if keep_applying {
-					fmt.Printf("%d applying %d\n", rf.me, messages[i].Command)
+					fmt.Printf("%d applying %d with value %d\n", rf.me, lastApplied-num_to_apply+i+1, messages[i].Command)
 					rf.applyCh <- messages[i]
 				} else {
 					fmt.Printf("%d stop applying at %d\n", rf.me, messages[i].Command)
@@ -643,7 +649,7 @@ func (rf *Raft) applyCommands() {
 }
 
 func (rf *Raft) ticker() {
-	for !rf.killed() {
+	for !rf.Killed() {
 		time.Sleep(10 * time.Millisecond)
 
 		rf.mu.Lock()
@@ -714,6 +720,7 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 	// DebugPrint(dHeartbeat, "S%d heartbeated from %d", rf.me, args.LeaderId)
 	rf.resetElectionTimer()
 
+	// Update commit index from heartbeat, if relevant
 	if rf.commitIndex < args.LeaderCommit && isHeartbeat {
 		prevCommitIndex := rf.commitIndex
 		rf.commitIndex = min(args.LeaderCommit, len(rf.logEntries)-1)
@@ -732,12 +739,30 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 		rf.persist()
 	}
 
+	//  Update current term from append entries
 	if rf.currentTerm < args.Term {
 		rf.currentTerm = args.Term
 	}
 
 	// If it was a heartbeat, just return now
 	if isHeartbeat {
+		// ohh ok
+		// DebugPrint(dCommit, "S%d (heartbeat) len %d vs received %d", rf.me, len(rf.logEntries), args.LogLength)
+		// DebugPrint(dCommit, "S%d (heartbeat) commit index %d, received %d", rf.me, rf.commitIndex, args.LeaderCommit)
+		if len(rf.logEntries) < args.LogLength || rf.commitIndex < args.CommitIndexFr {
+			// basically we are unable to update our commit index to the leader's commit :(
+			// DebugPrint(dCommit, "S%d (HEART) len %d, received %d. commit %d vs %d", rf.me, len(rf.logEntries), args.LogLength, rf.commitIndex, args.CommitIndexFr)
+			// reply.Success = false
+			// Co-opt the x index and success flag here lol
+
+			// Term    int
+			// Success bool
+			// XTerm   int
+			// XIndex  int
+			// XLen    int
+		} else {
+			// reply.Success = true
+		}
 		return
 	}
 
@@ -802,6 +827,23 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 
 func (rf *Raft) sendAppendEntriesHeartbeat(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.ReceiveAppendEntries", args, reply)
+	if ok {
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+
+		if reply.Success {
+			// do nothing
+			// DebugPrint(dCommit, "S%d (LEADER) heartbeat was SUCCESSFUL to %d", rf.me, server)
+		} else {
+			// DebugPrint(dCommit, "S%d (LEADER) heartbeat was UNSUCCESSFUL to %d, resending", rf.me, server)
+			rf.nextIndex[server] = max(1, rf.nextIndex[server]-1)
+			rf.nextIndex[server] = max(rf.nextIndex[server], rf.matchIndex[server]+1)
+
+			// check match index here too
+			// umm ok
+			rf.IssueAppendToPeer(server)
+		}
+	}
 	return ok
 }
 
@@ -910,7 +952,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 		// something failed
-		if rf.believesLeader && !rf.killed() {
+		if rf.believesLeader && !rf.Killed() {
 
 			// check the match index to see if this rpc is still relevant
 			// lowkey add this check up above too?
@@ -918,15 +960,15 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			serverMatch := rf.matchIndex[server]
 			attemptedMatch := args.PrevLogIndex + len(args.LogEntries)
 
-			DebugPrint(dReceiveAppend, "S%d (term %d) didn't get reply to append %d-%d to %d, match=%d attempt=%d",
-				rf.me, rf.currentTerm, args.PrevLogIndex+1, args.PrevLogIndex+len(args.LogEntries), server,
-				serverMatch, attemptedMatch)
+			// DebugPrint(dReceiveAppend, "S%d (term %d) didn't get reply to append %d-%d to %d, match=%d attempt=%d",
+			// 	rf.me, rf.currentTerm, args.PrevLogIndex+1, args.PrevLogIndex+len(args.LogEntries), server,
+			// 	serverMatch, attemptedMatch)
 
 			if serverMatch >= attemptedMatch {
 				return ok
 			}
 
-			DebugPrint(dReceiveAppend, "S%d (^ so we're trying again)", rf.me)
+			// DebugPrint(dReceiveAppend, "S%d (^ so we're trying again)", rf.me)
 
 			if rf.nextIndex[server] == 1 {
 				// If we've already backed up to the earliest log, just give up entirely
@@ -960,7 +1002,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				// rf.nextIndex[server] = max(rf.nextIndex[server], 1)
 				rf.nextIndex[server] = max(rf.nextIndex[server]-1, 1)
 				rf.nextIndex[server] = max(rf.nextIndex[server], rf.matchIndex[server]+1)
-				DebugPrint(dReceiveAppend, "S%d (term %d) RESENDIN' append (from %d, match %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], rf.matchIndex[server], server)
+				// DebugPrint(dReceiveAppend, "S%d (term %d) RESENDIN' append (from %d, match %d) to %d", rf.me, rf.currentTerm, rf.nextIndex[server], rf.matchIndex[server], server)
 				rf.IssueAppendToPeer(server)
 			}
 		}
