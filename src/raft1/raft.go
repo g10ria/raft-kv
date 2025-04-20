@@ -87,6 +87,8 @@ type AppendEntriesReply struct {
 	XTerm   int
 	XIndex  int
 	XLen    int
+
+	HeartbeatSuccess bool
 }
 
 type InstallSnapshotArgs struct {
@@ -571,9 +573,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft) Kill() {
-	rf.mu.Lock()
 	atomic.StoreInt32(&rf.dead, 1)
 	DebugPrint(dLeader, "S%d KILLED", rf.me)
+	rf.mu.Lock()
 	fmt.Printf("S%d KILLED\n", rf.me)
 	close(rf.applyCh)
 	rf.mu.Unlock()
@@ -702,6 +704,8 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 
 	isHeartbeat := len(args.LogEntries) == 0
 
+	reply.HeartbeatSuccess = true
+
 	// Always reply letting them know what my term is
 	reply.Term = rf.currentTerm
 
@@ -752,7 +756,7 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 		if len(rf.logEntries) < args.LogLength || rf.commitIndex < args.CommitIndexFr {
 			// basically we are unable to update our commit index to the leader's commit :(
 			// DebugPrint(dCommit, "S%d (HEART) len %d, received %d. commit %d vs %d", rf.me, len(rf.logEntries), args.LogLength, rf.commitIndex, args.CommitIndexFr)
-			// reply.Success = false
+			reply.HeartbeatSuccess = false
 			// Co-opt the x index and success flag here lol
 
 			// Term    int
@@ -760,8 +764,6 @@ func (rf *Raft) ReceiveAppendEntries(args *AppendEntriesArgs, reply *AppendEntri
 			// XTerm   int
 			// XIndex  int
 			// XLen    int
-		} else {
-			// reply.Success = true
 		}
 		return
 	}
@@ -831,7 +833,7 @@ func (rf *Raft) sendAppendEntriesHeartbeat(server int, args *AppendEntriesArgs, 
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 
-		if reply.Success {
+		if reply.HeartbeatSuccess {
 			// do nothing
 			// DebugPrint(dCommit, "S%d (LEADER) heartbeat was SUCCESSFUL to %d", rf.me, server)
 		} else {
