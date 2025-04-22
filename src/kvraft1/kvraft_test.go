@@ -3,13 +3,14 @@ package kvraft
 import (
 	"fmt"
 	//"log"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
 
 	"6.5840/kvraft1/rsm"
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 	tester "6.5840/tester1"
 )
 
@@ -46,9 +47,10 @@ func (ts *Test) GenericTest() {
 		default_key = kvtest.MakeKeys(NKEYS)
 	}
 	for i := 0; i < NITER; i++ {
-		// log.Printf("Iteration %v\n", i)
+		fmt.Printf("Iteration %v\n", i)
 
 		go func() {
+			fmt.Printf("\n\nputting?\n\n")
 			rs := ts.SpawnClientsAndWait(ts.nclients, T, func(cli int, ck kvtest.IKVClerk, done chan struct{}) kvtest.ClntRes {
 				return ts.OneClientPut(cli, ck, default_key, done)
 			})
@@ -56,6 +58,8 @@ func (ts *Test) GenericTest() {
 				reliable := ts.IsReliable() && !ts.crash && !ts.partitions
 				ts.CheckPutConcurrent(ck, default_key[0], rs, &res, reliable)
 			}
+
+			fmt.Printf("\n\nput done?\n\n")
 			ch_spawn <- struct{}{}
 		}()
 
@@ -65,7 +69,11 @@ func (ts *Test) GenericTest() {
 			go ts.Partitioner(Gid, ch_partitioner)
 		}
 
+		fmt.Printf("\n\nwaiting for clients to finish\n\n")
+
 		<-ch_spawn // wait for clients to be done
+
+		fmt.Printf("\ndone waiting\n\n")
 
 		if i == NITER-1 {
 			tester.SetAnnotationFinalized()

@@ -23,12 +23,6 @@ type Op struct {
 	Req any
 }
 
-// A server (i.e., ../server.go) that wants to replicate itself calls
-// MakeRSM and must implement the StateMachine interface. This
-// interface allows the rsm package to interact with the server for
-// server-specific operations: the server must implement DoOp to
-// execute an operation (e.g., a Get or Put request), and
-// Snapshot/Restore to snapshot and restore the server's state.
 type StateMachine interface {
 	DoOp(any) any
 	Snapshot() []byte
@@ -111,7 +105,9 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	fmt.Printf("%d client submitting op %d\n", rsm.me, id)
 
+	rsm.mu.Lock()
 	rsm.term = term
+	rsm.mu.Unlock()
 	if !isLeader {
 		return rpc.ErrWrongLeader, nil
 	}

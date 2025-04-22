@@ -263,7 +263,9 @@ func (rf *Raft) resetElectionTimer() {
 	candidateTimer := now.Add(time.Duration(ms) * time.Millisecond)
 
 	if candidateTimer.After(rf.electionTimer) {
+		// rf.mu.Lock()
 		rf.electionTimer = candidateTimer
+		// rf.mu.Unlock()
 	}
 }
 
@@ -619,7 +621,7 @@ func (rf *Raft) applyCommands() {
 				applyMsg.CommandIndex = lastApplied
 				applyMsg.CommandTerm = rf.logTermsReceived[lastApplied]
 
-				DebugPrint(dCommit, "S%d APPLYING %d with value %d", rf.me, lastApplied, applyMsg.Command)
+				DebugPrint(dCommit, "S%d APPLYING %d", rf.me, lastApplied)
 				// fmt.Printf("S%d APPLYING %d with value %d\n", rf.me, lastApplied, applyMsg.Command)
 
 				messages[i] = applyMsg
@@ -633,7 +635,7 @@ func (rf *Raft) applyCommands() {
 				keep_applying = !rf.Killed()
 				// getting killed here?
 				if keep_applying {
-					fmt.Printf("%d applying %d with value %d\n", rf.me, lastApplied-num_to_apply+i+1, messages[i].Command)
+					fmt.Printf("%d applying %d\n", rf.me, lastApplied-num_to_apply+i+1)
 					rf.applyCh <- messages[i]
 				} else {
 					fmt.Printf("%d stop applying at %d\n", rf.me, messages[i].Command)
@@ -835,14 +837,11 @@ func (rf *Raft) sendAppendEntriesHeartbeat(server int, args *AppendEntriesArgs, 
 
 		if reply.HeartbeatSuccess {
 			// do nothing
-			// DebugPrint(dCommit, "S%d (LEADER) heartbeat was SUCCESSFUL to %d", rf.me, server)
 		} else {
 			// DebugPrint(dCommit, "S%d (LEADER) heartbeat was UNSUCCESSFUL to %d, resending", rf.me, server)
 			rf.nextIndex[server] = max(1, rf.nextIndex[server]-1)
 			rf.nextIndex[server] = max(rf.nextIndex[server], rf.matchIndex[server]+1)
 
-			// check match index here too
-			// umm ok
 			rf.IssueAppendToPeer(server)
 		}
 	}
@@ -1050,7 +1049,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.applyCommands()
 	go rf.sendHeartbeats()
 
+	rf.mu.Lock()
 	rf.resetElectionTimer()
+	rf.mu.Unlock()
 
 	return rf
 }

@@ -13,23 +13,15 @@ import (
 type Clerk struct {
 	clnt    *tester.Clnt
 	servers []string
-	leader  int
-	mu      sync.Mutex
 	// You will have to modify this struct.
+	mu     sync.Mutex
+	leader int
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
-	ck := &Clerk{clnt: clnt, servers: servers, leader: 0}
+	ck := &Clerk{clnt: clnt, servers: servers}
 	// You'll have to add code here.
 	return ck
-}
-
-var DEBUG = false
-
-func (ck *Clerk) debug(s ...interface{}) {
-	if DEBUG {
-		fmt.Println(s...)
-	}
 }
 
 // Get fetches the current value and version for a key.  It returns
@@ -43,27 +35,23 @@ func (ck *Clerk) debug(s ...interface{}) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-	defer ck.debug("return from get")
-	ck.debug("called get with key", key)
+
+	// Repeatedly sends the Get request
+	// If the leader is wrong, cycle to the next one and try again
 	for {
 		args := rpc.GetArgs{Key: key}
 		reply := rpc.GetReply{}
+		leader := ck.leader
+		ok := ck.clnt.Call(ck.servers[leader], "KVServer.Get", &args, &reply)
 
-		l := ck.leader
-		ck.debug("sending get to leader", l)
-		ok := ck.clnt.Call(ck.servers[l], "KVServer.Get", &args, &reply)
-		ck.debug("received response from get", l)
-		if !ok || (ok && reply.Err == rpc.ErrWrongLeader) {
-			ck.debug("get lock acq")
-			ck.mu.Lock()
-			if l == ck.leader {
-				ck.leader = (ck.leader + 1) % len(ck.servers)
-			}
+		ck.mu.Lock()
+		if ok && reply.Err != rpc.ErrWrongLeader {
 			ck.mu.Unlock()
-			// time.Sleep(100 * time.Millisecond)
-			continue
+			return reply.Value, reply.Version, reply.Err
+		} else if ck.leader == leader {
+			ck.leader = (ck.leader + 1) % len(ck.servers)
 		}
-		return reply.Value, reply.Version, reply.Err
+		ck.mu.Unlock()
 	}
 }
 
@@ -85,59 +73,35 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
-	defer ck.debug("return from put")
-
-	ck.debug("called put with key", key, "| value", value, "| version", version)
-	// You will have to modify this function.
-	args := rpc.PutArgs{
-		Key:     key,
-		Value:   value,
-		Version: version,
-	}
+	args := rpc.PutArgs{Key: key, Value: value, Version: version}
 	reply := rpc.PutReply{}
-
-	l := ck.leader
-	ck.debug("sending put to leader", l)
-
-	ok := ck.clnt.Call(ck.servers[l], "KVServer.Put", &args, &reply)
-	ck.debug("received response from put", l)
+	leader := ck.leader
+	fmt.Printf("\n\nCLERK PUT %s %s\n\n", key, value)
+	ok := ck.clnt.Call(ck.servers[leader], "KVServer.Put", &args, &reply)
 
 	if ok && reply.Err != rpc.ErrWrongLeader {
 		return reply.Err
-	} else {
+	}
+
+	for {
+		fmt.Printf("\n\nputting again\n\n")
 		ck.mu.Lock()
-		ck.debug("put lock acq")
-		if l == ck.leader { // if ck.leader has already been changed, just try again with the new leader
+		if ck.leader == leader {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
 		}
 		ck.mu.Unlock()
-	}
-
-	// Dropped message case
-	for {
 		time.Sleep(100 * time.Millisecond)
 
+		args := rpc.PutArgs{Key: key, Value: value, Version: version}
 		reply := rpc.PutReply{}
-		l := ck.leader
-		ck.debug("retrying put to leader", l)
-		ok := ck.clnt.Call(ck.servers[l], "KVServer.Put", &args, &reply)
-		ck.debug("received response from put", l)
+		leader = ck.leader
+		ok := ck.clnt.Call(ck.servers[ck.leader], "KVServer.Put", &args, &reply)
 
-		if !ok || (ok && reply.Err == rpc.ErrWrongLeader) {
-			ck.mu.Lock()
-			ck.debug("put lock acq")
-			if l == ck.leader { // if ck.leader has already been changed, just try again with the new leader
-				ck.leader = (ck.leader + 1) % len(ck.servers)
+		if ok && reply.Err != rpc.ErrWrongLeader {
+			if reply.Err == rpc.ErrVersion {
+				return rpc.ErrMaybe
 			}
-			ck.mu.Unlock()
-			continue
-		} // try again
-
-		switch reply.Err {
-		case rpc.OK:
-			return rpc.OK
-		case rpc.ErrVersion:
-			return rpc.ErrMaybe
+			return reply.Err
 		}
 	}
 }
