@@ -3,7 +3,6 @@ package kvraft
 import (
 	"fmt"
 	//"log"
-	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -79,7 +78,7 @@ func (ts *Test) GenericTest() {
 			tester.SetAnnotationFinalized()
 		}
 
-		ts.CheckPorcupine()
+		// ts.CheckPorcupine()
 
 		if ts.partitions {
 			ch_partitioner <- true

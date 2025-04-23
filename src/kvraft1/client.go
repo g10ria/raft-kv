@@ -1,7 +1,6 @@
 package kvraft
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -13,29 +12,19 @@ import (
 type Clerk struct {
 	clnt    *tester.Clnt
 	servers []string
-	// You will have to modify this struct.
-	mu     sync.Mutex
-	leader int
+	mu      sync.Mutex
+	leader  int
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 	ck := &Clerk{clnt: clnt, servers: servers}
-	// You'll have to add code here.
 	return ck
 }
 
 // Get fetches the current value and version for a key.  It returns
 // ErrNoKey if the key does not exist. It keeps trying forever in the
 // face of all other errors.
-//
-// You can send an RPC to server i with code like this:
-// ok := ck.clnt.Call(ck.servers[i], "KVServer.Get", &args, &reply)
-//
-// The types of args and reply (including whether they are pointers)
-// must match the declared types of the RPC handler function's
-// arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-
 	// Repeatedly sends the Get request
 	// If the leader is wrong, cycle to the next one and try again
 	for {
@@ -65,26 +54,19 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // its earlier RPC might have been processed by the server successfully
 // but the response was lost, and the the Clerk doesn't know if
 // the Put was performed or not.
-//
-// You can send an RPC to server i with code like this:
-// ok := ck.clnt.Call(ck.servers[i], "KVServer.Put", &args, &reply)
-//
-// The types of args and reply (including whether they are pointers)
-// must match the declared types of the RPC handler function's
-// arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	args := rpc.PutArgs{Key: key, Value: value, Version: version}
 	reply := rpc.PutReply{}
 	leader := ck.leader
-	fmt.Printf("\n\nCLERK PUT %s %s\n\n", key, value)
 	ok := ck.clnt.Call(ck.servers[leader], "KVServer.Put", &args, &reply)
 
+	// return same error if it wasn't wrong leader (we should try again in that case)
 	if ok && reply.Err != rpc.ErrWrongLeader {
 		return reply.Err
 	}
 
+	// otherwise, keep attempting to submit again (to different leaders)
 	for {
-		fmt.Printf("\n\nputting again\n\n")
 		ck.mu.Lock()
 		if ck.leader == leader {
 			ck.leader = (ck.leader + 1) % len(ck.servers)

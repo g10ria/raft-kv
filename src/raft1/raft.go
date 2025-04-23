@@ -577,10 +577,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	DebugPrint(dLeader, "S%d KILLED", rf.me)
-	rf.mu.Lock()
+	// rf.mu.Lock()
 	fmt.Printf("S%d KILLED\n", rf.me)
+
+	time.Sleep(50 * time.Millisecond) // sleep before closing channel
 	close(rf.applyCh)
-	rf.mu.Unlock()
+	// rf.mu.Unlock()
 }
 
 func (rf *Raft) Killed() bool {
@@ -636,13 +638,13 @@ func (rf *Raft) applyCommands() {
 				// getting killed here?
 				if keep_applying {
 					fmt.Printf("%d applying %d\n", rf.me, lastApplied-num_to_apply+i+1)
+					rf.mu.Unlock()
 					rf.applyCh <- messages[i]
 				} else {
 					fmt.Printf("%d stop applying at %d\n", rf.me, messages[i].Command)
 					rf.mu.Unlock()
 					break
 				}
-				rf.mu.Unlock()
 			}
 		} else {
 			rf.mu.Unlock()

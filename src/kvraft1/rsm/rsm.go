@@ -1,9 +1,6 @@
-// rsm, changed broken
-
 package rsm
 
 import (
-	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -19,8 +16,8 @@ var useRaftStateMachine bool // to plug in another raft besided raft1
 
 type Op struct {
 	Me  int
-	Id  int
-	Req any
+	Id  int64
+	Req any // message value
 }
 
 type StateMachine interface {
@@ -29,56 +26,54 @@ type StateMachine interface {
 	Restore([]byte)
 }
 
-type RSM struct {
-	mu           sync.Mutex
-	me           int
-	rf           raftapi.Raft
-	applyCh      chan raftapi.ApplyMsg
-	maxraftstate int // snapshot if log grows this big
-	sm           StateMachine
-
-	pending_ch map[int]chan any
-	idx_id_map map[int][]int
-	id_idx_map map[int]int
-	close_ch   chan int
-	closeOnce  sync.Once
-	term       int
+// stores results of submitted messages
+type SubmitMsg struct {
+	ok     bool
+	result any
 }
 
-// servers[] contains the ports of the set of
-// servers that will cooperate via Raft to
-// form the fault-tolerant key/value service.
-//
-// me is the index of the current server in servers[].
-//
-// the k/v server should store snapshots through the underlying Raft
-// implementation, which should call persister.SaveStateAndSnapshot() to
-// atomically save the Raft state along with the snapshot.
-// The RSM should snapshot when Raft's saved state exceeds maxraftstate bytes,
-// in order to allow Raft to garbage-collect its log. if maxraftstate is -1,
-// you don't need to snapshot.
-//
-// MakeRSM() must return quickly, so it should start goroutines for
-// any long-running work.
+// stores pending messages
+type PendingSubmit struct {
+	index    int
+	term     int
+	id       int64
+	submitCh chan SubmitMsg
+}
+
+type RSM struct {
+	mu            sync.Mutex
+	me            int
+	rf            raftapi.Raft
+	applyCh       chan raftapi.ApplyMsg
+	maxraftstate  int // snapshot if log grows this big
+	sm            StateMachine
+	pendings      []PendingSubmit
+	channelClosed bool
+	lastApplied   int
+}
+
+var snapshotThreshold = 0.8
+var checkForSnapshotFreq = 10
+
 func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, maxraftstate int, sm StateMachine) *RSM {
 	rsm := &RSM{
 		me:           me,
 		maxraftstate: maxraftstate,
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
-
-		pending_ch: make(map[int]chan any),
-		idx_id_map: make(map[int][]int),
-		id_idx_map: make(map[int]int),
-		close_ch:   make(chan int),
-		closeOnce:  sync.Once{},
+		pendings:     make([]PendingSubmit, 0),
 	}
-
-	go rsm.Submit_reader_helper()
-
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+	snapshot := persister.ReadSnapshot()
+	if len(snapshot) > 0 {
+		rsm.sm.Restore(snapshot)
+	}
+
+	go rsm.applyChannelWatcher()
+	go rsm.checkIfSnapshot()
+
 	return rsm
 }
 
@@ -86,100 +81,119 @@ func (rsm *RSM) Raft() raftapi.Raft {
 	return rsm.rf
 }
 
-func (rsm *RSM) cleanup(id int) {
-	rsm.mu.Lock()
-	delete(rsm.pending_ch, id)
-	rsm.mu.Unlock()
-}
-
-type RaftState struct {
-	term   int
-	leader bool
-}
-
-func (rsm *RSM) Submit(req any) (rpc.Err, any) {
-	id := rand.Int()
-	op := Op{Me: rsm.me, Id: id, Req: req}
-
-	index, term, isLeader := rsm.rf.Start(op)
-
-	fmt.Printf("%d client submitting op %d\n", rsm.me, id)
-
-	rsm.mu.Lock()
-	rsm.term = term
-	rsm.mu.Unlock()
-	if !isLeader {
-		return rpc.ErrWrongLeader, nil
-	}
-
-	pending_ch := make(chan any)
-
-	rsm.mu.Lock()
-	rsm.pending_ch[id] = pending_ch
-	rsm.idx_id_map[index] = append(rsm.idx_id_map[index], id)
-	rsm.id_idx_map[id] = index
-	rsm.mu.Unlock()
-
-	termCh := make(chan RaftState)
-	for {
-		go func() {
-			curterm, thinks_leader := rsm.rf.GetState()
-			termCh <- RaftState{term: curterm, leader: thinks_leader}
-		}()
-
-		select {
-		case message := <-termCh:
-			if message.term != term || !message.leader {
-				rsm.cleanup(id)
-				return rpc.ErrWrongLeader, nil
-			}
-		case result := <-pending_ch:
-			if result == -1 {
-				rsm.cleanup(id)
-				return rpc.ErrWrongLeader, nil
-			}
-			return rpc.OK, result
-		case <-rsm.close_ch:
-			rsm.cleanup(id)
-			return rpc.ErrWrongLeader, nil
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
-func (rsm *RSM) Submit_reader_helper() {
-	for message := range rsm.applyCh {
-		op := message.Command.(Op)
-		result := rsm.sm.DoOp(op.Req)
-
+// Reads all applied messages and funnels them to the correct pending message
+func (rsm *RSM) applyChannelWatcher() {
+	count := 0
+	for applyMsg := range rsm.applyCh {
 		rsm.mu.Lock()
 
-		// notify
-		if pending_ch, ok := rsm.pending_ch[op.Id]; ok {
-			pending_ch <- result
-			delete(rsm.pending_ch, op.Id)
+		if !applyMsg.CommandValid {
+			rsm.sm.Restore(applyMsg.Snapshot)
+			rsm.mu.Unlock()
+			continue
 		}
 
-		// reject other requests
-		index := rsm.id_idx_map[op.Id]
-		for _, other_pending_ids := range rsm.idx_id_map[index] {
-			if other_pending_ids != op.Id {
-				if pending_ch, ok := rsm.pending_ch[other_pending_ids]; ok {
-					pending_ch <- -1
-					delete(rsm.pending_ch, other_pending_ids)
+		count++
+		op := applyMsg.Command.(Op)
+		result := rsm.sm.DoOp(op.Req)
+
+		rsm.lastApplied = applyMsg.CommandIndex
+		if rsm.maxraftstate != -1 && count == checkForSnapshotFreq {
+			count = 0
+			if rsm.shouldSnapshot() {
+				rsm.rf.Snapshot(applyMsg.CommandIndex, rsm.sm.Snapshot())
+			}
+		}
+
+		if len(rsm.pendings) != 0 {
+			mostRecentPending := rsm.pendings[0]
+
+			if applyMsg.CommandIndex == mostRecentPending.index {
+				if mostRecentPending.id == op.Id && rsm.me == op.Me {
+					mostRecentPending.submitCh <- SubmitMsg{ok: true, result: result}
+					rsm.pendings = rsm.pendings[1:]
+				} else {
+					rsm.killAllPendings()
+				}
+			} else {
+				if applyMsg.CommandTerm > mostRecentPending.term {
+					rsm.killAllPendings()
+				}
+			}
+		}
+		rsm.mu.Unlock()
+	}
+
+	rsm.channelClosed = true
+
+	rsm.mu.Lock()
+	rsm.killAllPendings()
+	rsm.mu.Unlock()
+}
+
+func (rsm *RSM) killAllPendings() {
+	for _, pending := range rsm.pendings {
+		pending.submitCh <- SubmitMsg{ok: false, result: nil}
+	}
+	rsm.pendings = make([]PendingSubmit, 0)
+}
+
+func (rsm *RSM) checkIfSnapshot() {
+	// Periodically checks for snapshots and prunes the pending array if our term is too high
+	for {
+		rsm.mu.Lock()
+
+		if len(rsm.pendings) != 0 {
+			pending := rsm.pendings[0]
+			term, _ := rsm.rf.GetState()
+
+			if term > pending.term {
+				rsm.killAllPendings()
+			}
+
+			if rsm.maxraftstate != -1 {
+				if rsm.shouldSnapshot() {
+					rsm.rf.Snapshot(rsm.lastApplied, rsm.sm.Snapshot())
 				}
 			}
 		}
 
-		// cleanup
-		delete(rsm.id_idx_map, op.Id)
-		delete(rsm.idx_id_map, index)
-
 		rsm.mu.Unlock()
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+func (rsm *RSM) shouldSnapshot() bool {
+	return float64(rsm.rf.PersistBytes()) > float64(rsm.maxraftstate)*snapshotThreshold
+}
+
+func (rsm *RSM) Submit(req any) (rpc.Err, any) {
+	rsm.mu.Lock()
+
+	id := rand.Int63() // generate random ID
+	op := Op{Me: rsm.me, Id: id, Req: req}
+	index, term, isLeader := rsm.rf.Start(op)
+
+	if !isLeader || rsm.channelClosed {
+		rsm.mu.Unlock()
+		return rpc.ErrWrongLeader, nil
 	}
 
-	rsm.closeOnce.Do(func() {
-		close(rsm.close_ch)
-	})
+	// Create the pending message and add to pending array
+	pending := PendingSubmit{
+		index:    index,
+		term:     term,
+		id:       id,
+		submitCh: make(chan SubmitMsg),
+	}
+	rsm.pendings = append(rsm.pendings, pending)
+	rsm.mu.Unlock()
+
+	// Wait for submit result to come in
+	submitMsg := <-pending.submitCh
+
+	if submitMsg.ok {
+		return rpc.OK, submitMsg.result
+	}
+	return rpc.ErrWrongLeader, nil
 }
