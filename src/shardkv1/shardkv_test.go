@@ -2,14 +2,15 @@ package shardkv
 
 import (
 	//"log"
+	"fmt"
 	"testing"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardctrler"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 const (
@@ -102,13 +103,17 @@ func TestJoinBasic5A(t *testing.T) {
 		ts.t.Fatalf("TestJoinBasic5A: %d isn't a member of %v", gid2, cfg1)
 	}
 
+	fmt.Printf("CHECKING SHUTDOWN OF %d\n", gid1)
 	ts.checkShutdownSharding(gid1, ka, va)
+	fmt.Printf("DONE CHECKING SHUTDOWN OF %d\n", gid1)
 
 	for i := 0; i < len(ka); i++ {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1))
 	}
 
+	fmt.Printf("CHECKING SHUTDOWN OF %d\n", gid2)
 	ts.checkShutdownSharding(gid2, ka, va)
+	fmt.Printf("DONE CHECKING SHUTDOWN OF %d\n", gid2)
 
 	for i := 0; i < len(ka); i++ {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1))
@@ -166,22 +171,30 @@ func TestJoinLeaveBasic5A(t *testing.T) {
 		ts.t.Fatalf("TestJoinLeaveBasic5A: joinGroups failed")
 	}
 
+	fmt.Printf("\n\n1\n\n")
+
 	ts.checkShutdownSharding(gid1, ka, va)
 
 	for i := 0; i < len(ka); i++ {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1))
 	}
 
+	fmt.Printf("\n\n2\n\n")
+
 	ts.leave(sck, shardcfg.Gid1)
 	if ok := ts.checkMember(sck, shardcfg.Gid1); ok {
 		ts.t.Fatalf("%d is a member after leave", shardcfg.Gid1)
 	}
+
+	fmt.Printf("\n\n3\n\n")
 
 	ts.Group(shardcfg.Gid1).Shutdown()
 
 	for i := 0; i < len(ka); i++ {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1))
 	}
+
+	fmt.Printf("\n\n4\n\n")
 
 	// bring the crashed shard/group back to life.
 	ts.Group(shardcfg.Gid1).StartServers()
@@ -421,6 +434,8 @@ func TestProgressJoin5A(t *testing.T) {
 
 // Test linearizability with groups joining/leaving and `nclnt`
 // concurrent clerks put/get's in `unreliable` net.
+
+// t, 1, true, "Test (5A): one concurrent clerk reliable..."
 func concurrentClerk(t *testing.T, nclnt int, reliable bool, part string) {
 	const (
 		NSEC = 20

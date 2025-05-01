@@ -1,6 +1,24 @@
 package rpc
 
+import "fmt"
+
 type Err string
+
+const DEBUG = false
+
+func LogDebugln(str ...interface{}) {
+	if DEBUG {
+		fmt.Println(str...)
+		return
+	}
+}
+
+func LogDebugf(str string, params ...any) {
+	if DEBUG {
+		fmt.Printf(str, params...)
+		return
+	}
+}
 
 const (
 	// Err's returned by server and Clerk
@@ -37,4 +55,3 @@ type GetReply struct {
 	Version Tversion
 	Err     Err
 }
-

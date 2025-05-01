@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"6.5840/kvraft1/rsm"
-	"6.5840/kvsrv1"
+	kvsrv "6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 	"6.5840/labrpc"
 	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardctrler"
 	"6.5840/shardkv1/shardgrp"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Test struct {
@@ -193,6 +193,7 @@ func (ts *Test) disconnectClntFromLeader(gid tester.Tgid) int {
 func (ts *Test) checkShutdownSharding(down tester.Tgid, ka []string, va []string) {
 	const NSEC = 2
 
+	// fmt.Printf("SHUTTING DOWN SERVERS IN GROUP %d\n", down)
 	ts.Group(down).Shutdown()
 
 	n := len(ka)
@@ -233,6 +234,7 @@ func (ts *Test) checkShutdownSharding(down tester.Tgid, ka []string, va []string
 	}
 
 	// bring the crashed shard/group back to life.
+	// fmt.Printf("STARTING UP SERVERS IN GROUP %d\n", down)
 	ts.Group(down).StartServers()
 }
 

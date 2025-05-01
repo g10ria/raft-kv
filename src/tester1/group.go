@@ -3,7 +3,6 @@ package tester
 import (
 	//"log"
 
-	"fmt"
 	"strconv"
 	"sync"
 
@@ -140,7 +139,7 @@ func (sg *ServerGrp) ConnectAll() {
 }
 
 func (sg *ServerGrp) ConnectOne(i int) {
-	fmt.Printf("\n\nCONNECTING %d\n\n", i)
+	// fmt.Printf("\n\nCONNECTING %d\n\n", i)
 	sg.connect(i, sg.all())
 }
 

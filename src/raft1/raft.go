@@ -2,7 +2,6 @@ package raft
 
 import (
 	"bytes"
-	"fmt"
 	"math/rand"
 	"slices"
 	"sync"
@@ -578,7 +577,7 @@ func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	DebugPrint(dLeader, "S%d KILLED", rf.me)
 	// rf.mu.Lock()
-	fmt.Printf("S%d KILLED\n", rf.me)
+	// fmt.Printf("S%d KILLED\n", rf.me)
 
 	time.Sleep(50 * time.Millisecond) // sleep before closing channel
 	close(rf.applyCh)
@@ -637,11 +636,11 @@ func (rf *Raft) applyCommands() {
 				keep_applying = !rf.Killed()
 				// getting killed here?
 				if keep_applying {
-					fmt.Printf("%d applying %d\n", rf.me, lastApplied-num_to_apply+i+1)
+					// fmt.Printf("%d applying %d\n", rf.me, lastApplied-num_to_apply+i+1)
 					rf.mu.Unlock()
 					rf.applyCh <- messages[i]
 				} else {
-					fmt.Printf("%d stop applying at %d\n", rf.me, messages[i].Command)
+					// fmt.Printf("%d stop applying at %d\n", rf.me, messages[i].Command)
 					rf.mu.Unlock()
 					break
 				}
