@@ -257,7 +257,7 @@ func (rf *Raft) updateLogAfterSnapshot() {
 
 // Resets the election timer to the current time + a random offset
 func (rf *Raft) resetElectionTimer() {
-	ms := 1400 + (rand.Int63() % 700)
+	ms := 700 + (rand.Int63() % 400)
 	now := time.Now()
 	candidateTimer := now.Add(time.Duration(ms) * time.Millisecond)
 

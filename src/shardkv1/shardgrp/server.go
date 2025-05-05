@@ -75,6 +75,7 @@ func (kv *KVServer) DoOp(req any) any {
 		return rpc.PutReply{Err: rpc.ErrNoKey}
 	case rpc.GetArgs:
 		// fmt.Printf("grp%d get\n", kv.gid)
+		// fmt.Printf("shard %d is ours: %t\tshard is frozen: %t\n", shardcfg.Key2Shard(args.Key), kv.KeyIsOurs(args.Key), kv.KeyIsFrozen(args.Key))
 
 		if !kv.KeyIsOurs(args.Key) || kv.KeyIsFrozen(args.Key) {
 			return rpc.GetReply{Value: "", Version: 0, Err: rpc.ErrWrongGroup}
@@ -91,16 +92,22 @@ func (kv *KVServer) DoOp(req any) any {
 		return rpc.GetReply{Value: "", Version: 0, Err: rpc.ErrNoKey}
 
 	case shardrpc.FreezeShardArgs:
-		fmt.Printf("\tgrp%d freeze shard\n", kv.gid)
 		if args.Num < kv.shard_config_nums[args.Shard] {
+			fmt.Printf("\t\tgrp%d freeze shard %d (rejecting old)\n", kv.gid, args.Shard)
 			return rpc.ErrVersion
+		} else {
+			fmt.Printf("\tgrp%d freeze shard %d\n", kv.gid, args.Shard)
 		}
+
+		// make it so that you can only freeze shards if they're currently in shards
 
 		kv.shard_config_nums[args.Shard] = args.Num
 
-		// Freeze the shard
-		if !slices.Contains(kv.frozen_shards, args.Shard) {
-			kv.frozen_shards = append(kv.frozen_shards, args.Shard)
+		// Freeze the shard, if we're allowed (it's currently in shards)
+		if slices.Contains(kv.shards, args.Shard) {
+			if !slices.Contains(kv.frozen_shards, args.Shard) {
+				kv.frozen_shards = append(kv.frozen_shards, args.Shard)
+			}
 		}
 
 		// Retrieve the data!
@@ -111,7 +118,9 @@ func (kv *KVServer) DoOp(req any) any {
 		return shardrpc.FreezeShardReply{State: w.Bytes(), Num: args.Num, Err: rpc.OK}
 
 	case shardrpc.InstallShardArgs:
+		fmt.Printf("\t\tgrp%d received install shard %d\n", kv.gid, args.Shard)
 		if args.Num < kv.shard_config_nums[args.Shard] {
+			fmt.Printf("\t\tgrp%d install shard %d (rejecting old) %v\n", kv.gid, args.Shard, kv.shards)
 			return rpc.ErrVersion
 		}
 
@@ -133,12 +142,13 @@ func (kv *KVServer) DoOp(req any) any {
 		return shardrpc.InstallShardReply{Err: rpc.OK}
 	case shardrpc.DeleteShardArgs:
 		if args.Num < kv.shard_config_nums[args.Shard] {
+			fmt.Printf("\t\tgrp%d delete shard %d (rejecting old) %v\n", kv.gid, args.Shard, kv.shards)
 			return rpc.ErrVersion
 		}
 
 		kv.shard_config_nums[args.Shard] = args.Num
 
-		// Delete the shard
+		// Delete the shard if we're allowed rn
 		if slices.Contains(kv.shards, args.Shard) {
 			kv.shards = slices.DeleteFunc(kv.shards, func(n shardcfg.Tshid) bool {
 				return n == args.Shard

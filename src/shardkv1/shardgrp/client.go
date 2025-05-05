@@ -48,11 +48,13 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 		if !ok {
 			ok_failures += 1
 		}
-		if ok_failures > 50 {
+		if ok_failures > 30 {
 			ck.mu.Unlock()
 			return "", 0, rpc.ErrWrongGroup
 		}
 		ck.mu.Unlock()
+
+		time.Sleep(60 * time.Millisecond)
 	}
 }
 
@@ -94,11 +96,11 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		if !ok {
 			ok_failures += 1
 		}
-		if ok_failures > 50 {
+		if ok_failures > 30 {
 			return rpc.ErrWrongGroup
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(60 * time.Millisecond)
 	}
 }
 
@@ -139,11 +141,11 @@ func (ck *Clerk) FreezeShard(s shardcfg.Tshid, num shardcfg.Tnum) ([]byte, rpc.E
 		if !ok {
 			ok_failures += 1
 		}
-		if ok_failures > 50 {
+		if ok_failures > 15 {
 			return make([]byte, 0), rpc.ErrWrongGroup
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -177,11 +179,12 @@ func (ck *Clerk) InstallShard(s shardcfg.Tshid, state []byte, num shardcfg.Tnum)
 		if !ok {
 			ok_failures += 1
 		}
-		if ok_failures > 50 {
+		if ok_failures > 15 {
+			fmt.Printf("returning err wrong group for install shard %d config %d\n", s, num)
 			return rpc.ErrWrongGroup
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -215,10 +218,10 @@ func (ck *Clerk) DeleteShard(s shardcfg.Tshid, num shardcfg.Tnum) rpc.Err {
 		if !ok {
 			ok_failures += 1
 		}
-		if ok_failures > 50 {
+		if ok_failures > 15 {
 			return rpc.ErrWrongGroup
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 }

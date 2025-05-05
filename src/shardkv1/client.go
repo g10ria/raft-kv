@@ -68,7 +68,7 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	num_tries := 1 // tbh only try like 50 times max
 	for err == rpc.ErrWrongGroup {
 		ck.mu.Lock()
-		fmt.Printf("wrong group %d, retrying get...\n", responsible_shard)
+		fmt.Printf("wrong group %d, retrying get...\n", gid)
 		current_config := ck.sck.Query()
 		_, servers, _ := current_config.GidServers(responsible_shard)
 		clerk = shardgrp.MakeClerk(ck.clnt, servers)

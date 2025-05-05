@@ -21,8 +21,11 @@ type ShardCtrler struct {
 	clnt *tester.Clnt
 	kvtest.IKVClerk
 
-	killed int32 // set by Kill()
-	key    string
+	killed   int32 // set by Kill()
+	key      string
+	next_key string
+
+	clerks map[tester.Tgid]*shardgrp.Clerk
 
 	mu sync.Mutex
 }
@@ -33,6 +36,8 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 	srv := tester.ServerName(tester.GRP0, 0)
 	sck.IKVClerk = kvsrv.MakeClerk(clnt, srv)
 	sck.key = "CONFIG"
+	sck.next_key = "NEXT_CONFIG"
+	sck.clerks = make(map[tester.Tgid]*shardgrp.Clerk)
 	return sck
 }
 
@@ -40,6 +45,21 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
+	// init
+	curr_config, _, _ := sck.IKVClerk.Get(sck.key)
+	next_config, _, next_err := sck.IKVClerk.Get(sck.next_key)
+
+	if next_err == rpc.ErrNoKey {
+		// do nothing
+	} else {
+		curr := shardcfg.FromString(curr_config)
+		next := shardcfg.FromString(next_config)
+
+		if next.Num > curr.Num {
+			fmt.Printf("new controller init, continuing interrupted config %d\n", next.Num)
+			sck.ChangeConfigTo(next)
+		}
+	}
 }
 
 // Called once by the tester to supply the first configuration.  You
@@ -70,6 +90,9 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 	sck.mu.Lock()
 	defer sck.mu.Unlock()
 
+	nextConfigString := new.String()
+	sck.IKVClerk.Put(sck.next_key, nextConfigString, rpc.Tversion(new.Num-1))
+
 	old := sck.Query()
 	shardMoves := make([]ShardMove, 0) // store all of the shard moves
 
@@ -84,28 +107,51 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 		}
 	}
 
-	// making new clerks each time
+	// using cached clerks
 	for _, move := range shardMoves {
 		fmt.Printf("EXECUTING SHARDMOVE shard %d from grp%d to grp%d\n", move.tshid, move.from, move.to)
 		from := move.from
 		to := move.to
 
-		from_clerk := shardgrp.MakeClerk(sck.clnt, old.Groups[from])
+		from_clerk := sck.MakeOptionalAndGetClerk(from)
 		to_clerk := shardgrp.MakeClerk(sck.clnt, new.Groups[to])
 
-		// possible todo: handle errors here propertly
+		// possible todo: handle errors here properly
 		state, err := from_clerk.FreezeShard(move.tshid, new.Num)
-		if err == rpc.ErrWrongGroup { // if this is the wrong group, re-query the config and change again
-			old = sck.Query()
-			from_clerk = shardgrp.MakeClerk(sck.clnt, old.Groups[from])
-			to_clerk = shardgrp.MakeClerk(sck.clnt, new.Groups[to])
+		for err == rpc.ErrWrongGroup { // if this is the wrong group, re-query the config and change again
+			// from_clerk = sck.MakeRequiredAndGetClerk(from)
+			state, err = from_clerk.FreezeShard(move.tshid, new.Num)
 		}
-		to_clerk.InstallShard(move.tshid, state, new.Num)
-		from_clerk.DeleteShard(move.tshid, new.Num)
+
+		err = to_clerk.InstallShard(move.tshid, state, new.Num)
+		for err == rpc.ErrWrongGroup { // if this is the wrong group, re-query the config and change again
+			// to_clerk = sck.MakeRequiredAndGetClerk(to)
+			err = to_clerk.InstallShard(move.tshid, state, new.Num)
+		}
+
+		err = from_clerk.DeleteShard(move.tshid, new.Num)
+		for err == rpc.ErrWrongGroup { // if this is the wrong group, re-query the config and change again
+			// from_clerk = sck.MakeRequiredAndGetClerk(from)
+			err = from_clerk.DeleteShard(move.tshid, new.Num)
+		}
 	}
 
-	shardConfigString := new.String()
-	sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(new.Num-1))
+	sck.IKVClerk.Put(sck.key, nextConfigString, rpc.Tversion(new.Num-1))
+}
+
+func (sck *ShardCtrler) MakeOptionalAndGetClerk(group_id tester.Tgid) *shardgrp.Clerk {
+	clerk, ok := sck.clerks[group_id]
+	if ok {
+		return clerk
+	} else {
+		return sck.MakeRequiredAndGetClerk(group_id)
+	}
+}
+
+func (sck *ShardCtrler) MakeRequiredAndGetClerk(group_id tester.Tgid) *shardgrp.Clerk {
+	config := sck.Query()
+	sck.clerks[group_id] = shardgrp.MakeClerk(sck.clnt, config.Groups[group_id])
+	return sck.clerks[group_id]
 }
 
 // Return the current configuration
