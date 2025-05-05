@@ -54,7 +54,7 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 		}
 		ck.mu.Unlock()
 
-		time.Sleep(60 * time.Millisecond)
+		// time.Sleep(60 * time.Millisecond)
 	}
 }
 
