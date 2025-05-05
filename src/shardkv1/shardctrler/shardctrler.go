@@ -48,17 +48,8 @@ func (sck *ShardCtrler) InitController() {
 // pick the key to name the configuration.  The initial configuration
 // lists shardgrp shardcfg.Gid1 for all shards.
 func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
-	// sck.mu.Lock()
-	// defer sck.mu.Unlock()
-
 	shardConfigString := cfg.String()
-	err := sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(cfg.Num-1))
-
-	if err == rpc.OK {
-		fmt.Printf("init config was ok!\n")
-	} else {
-		fmt.Printf("%s", err)
-	}
+	sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(cfg.Num-1))
 
 	fmt.Printf("put %s\n", shardConfigString)
 }
@@ -102,7 +93,7 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 		from_clerk := shardgrp.MakeClerk(sck.clnt, old.Groups[from])
 		to_clerk := shardgrp.MakeClerk(sck.clnt, new.Groups[to])
 
-		// TODO: handle errors here properly
+		// possible todo: handle errors here propertly
 		state, err := from_clerk.FreezeShard(move.tshid, new.Num)
 		if err == rpc.ErrWrongGroup { // if this is the wrong group, re-query the config and change again
 			old = sck.Query()
@@ -114,21 +105,11 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 	}
 
 	shardConfigString := new.String()
-	err := sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(new.Num-1))
-
-	if err != rpc.OK {
-		fmt.Printf("something went wrong when putting the config...\n")
-	} else {
-		fmt.Printf("prev config %d: %s\n", old.Num, old.String())
-		fmt.Printf("put config %d: %s\n", new.Num, shardConfigString)
-	}
+	sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(new.Num-1))
 }
 
 // Return the current configuration
 func (sck *ShardCtrler) Query() *shardcfg.ShardConfig {
-	// sck.mu.Lock()
-	// defer sck.mu.Unlock()
 	config, _, _ := sck.IKVClerk.Get(sck.key)
-
 	return shardcfg.FromString(config)
 }

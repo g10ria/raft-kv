@@ -204,8 +204,6 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 
 func (kv *KVServer) KeyIsOurs(key string) bool {
 	shard := shardcfg.Key2Shard(key)
-	// fmt.Printf("grp%d %v contains %d: %t\n", kv.gid, kv.shards, shard, slices.Contains(kv.shards, shard))
-	// fmt.Printf("grp%d shards: %v\n", kv.gid, kv.shards)
 	return slices.Contains(kv.shards, shard)
 }
 
