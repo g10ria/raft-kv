@@ -135,8 +135,12 @@ func (kv *KVServer) DoOp(req any) any {
 		r := bytes.NewBuffer(args.State)
 		d := labgob.NewDecoder(r)
 		var values map[string]ValueTuple
+
 		if d.Decode(&values) == nil {
-			kv.values[args.Shard] = values
+			// check if values is empty
+			if len(values) != 0 {
+				kv.values[args.Shard] = values
+			}
 		}
 		fmt.Printf("\tgrp%d install shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
 		return shardrpc.InstallShardReply{Err: rpc.OK}

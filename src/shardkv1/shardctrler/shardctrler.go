@@ -46,11 +46,12 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
 	// init
+	fmt.Printf("\ninit new controller\n")
 	curr_config, _, _ := sck.IKVClerk.Get(sck.key)
 	next_config, _, next_err := sck.IKVClerk.Get(sck.next_key)
 
 	if next_err == rpc.ErrNoKey {
-		// do nothing
+		// note: this never happens now
 	} else {
 		curr := shardcfg.FromString(curr_config)
 		next := shardcfg.FromString(next_config)
@@ -70,6 +71,7 @@ func (sck *ShardCtrler) InitController() {
 func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 	shardConfigString := cfg.String()
 	sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(cfg.Num-1))
+	sck.IKVClerk.Put(sck.next_key, shardConfigString, rpc.Tversion(cfg.Num-1))
 
 	fmt.Printf("put %s\n", shardConfigString)
 }
@@ -85,7 +87,7 @@ type ShardMove struct {
 // changes the configuration it may be superseded by another
 // controller.
 func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
-	fmt.Printf("updating config to %d\n", new.Num)
+	fmt.Printf("\nstarted updating config to %d\n", new.Num)
 
 	sck.mu.Lock()
 	defer sck.mu.Unlock()
@@ -135,6 +137,8 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 			err = from_clerk.DeleteShard(move.tshid, new.Num)
 		}
 	}
+
+	fmt.Printf("\nfinished updating config to %d: %s\n", new.Num, nextConfigString)
 
 	sck.IKVClerk.Put(sck.key, nextConfigString, rpc.Tversion(new.Num-1))
 }
