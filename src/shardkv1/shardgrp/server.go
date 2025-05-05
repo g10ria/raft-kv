@@ -91,7 +91,7 @@ func (kv *KVServer) DoOp(req any) any {
 		return rpc.GetReply{Value: "", Version: 0, Err: rpc.ErrNoKey}
 
 	case shardrpc.FreezeShardArgs:
-		fmt.Printf("grp%d freeze shard\n", kv.gid)
+		fmt.Printf("\tgrp%d freeze shard\n", kv.gid)
 		if args.Num < kv.shard_config_nums[args.Shard] {
 			return rpc.ErrVersion
 		}
@@ -129,7 +129,7 @@ func (kv *KVServer) DoOp(req any) any {
 		if d.Decode(&values) == nil {
 			kv.values[args.Shard] = values
 		}
-		fmt.Printf("grp%d install shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
+		fmt.Printf("\tgrp%d install shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
 		return shardrpc.InstallShardReply{Err: rpc.OK}
 	case shardrpc.DeleteShardArgs:
 		if args.Num < kv.shard_config_nums[args.Shard] {
@@ -149,7 +149,7 @@ func (kv *KVServer) DoOp(req any) any {
 			delete(kv.values, args.Shard)
 		}
 
-		fmt.Printf("grp%d delete shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
+		fmt.Printf("\tgrp%d delete shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
 
 		return shardrpc.DeleteShardReply{Err: rpc.OK}
 	}

@@ -456,15 +456,21 @@ func concurrentClerk(t *testing.T, nclnt int, reliable bool, part string) {
 		ch <- rs
 	}(ch)
 
+	fmt.Printf("\n1\n")
+
 	sck := ts.ShardCtrler()
 	grps := ts.groups(NGRP)
 	if ok := ts.joinGroups(sck, grps); !ok {
 		t.Fatalf("concurrentClerk: joinGroups failed")
 	}
 
+	fmt.Printf("\n2\n")
+
 	if ok := ts.leaveGroups(sck, grps); !ok {
 		t.Fatalf("concurrentClerk: leaveGroups failed")
 	}
+
+	fmt.Printf("\n3\n")
 
 	<-ch
 

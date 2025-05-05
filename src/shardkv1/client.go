@@ -11,6 +11,7 @@ package shardkv
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	kvtest "6.5840/kvtest1"
@@ -51,28 +52,27 @@ func (ck *Clerk) addClerkForShard(shard_id shardcfg.Tshid) {
 // responsible for key.  You can make a clerk for that group by
 // calling shardgrp.MakeClerk(ck.clnt, servers).
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-	ck.mu.Lock()
-	defer ck.mu.Unlock()
-
 	responsible_shard := shardcfg.Key2Shard(key)
 
+	ck.mu.Lock()
 	config := ck.sck.Query()
 	gid := config.Shards[responsible_shard]
 	fmt.Printf("CLI issuing get %s to shard %d in group %d\n", key, responsible_shard, gid)
-	// if it's the right cfg
-
-	ck.addClerkForShard(responsible_shard)
-	clerk := ck.subClerks[responsible_shard]
+	_, servers, _ := config.GidServers(responsible_shard)
+	clerk := shardgrp.MakeClerk(ck.clnt, servers)
+	ck.mu.Unlock()
 
 	// now we have the clerk
 	ret, version, err := clerk.Get(key)
 
 	num_tries := 1 // tbh only try like 50 times max
 	for err == rpc.ErrWrongGroup {
-		// oops, remake config
+		ck.mu.Lock()
 		fmt.Printf("wrong group %d, retrying get...\n", responsible_shard)
-		ck.addClerkForShard(responsible_shard) // update clerk
-		clerk = ck.subClerks[responsible_shard]
+		current_config := ck.sck.Query()
+		_, servers, _ := current_config.GidServers(responsible_shard)
+		clerk = shardgrp.MakeClerk(ck.clnt, servers)
+		ck.mu.Unlock()
 
 		ret, version, err = clerk.Get(key)
 
@@ -81,31 +81,38 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 		if num_tries > 50 {
 			break
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
+
+	// fmt.Printf("CLI returning %s\n", err)
 
 	return ret, version, err
 }
 
 // Put a key to a shard group.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
-	ck.mu.Lock()
-	defer ck.mu.Unlock()
-
-	fmt.Printf("CLI issuing put %s %s %d\n", key, value, version)
-
 	responsible_shard := shardcfg.Key2Shard(key)
 
-	ck.addClerkForShard(responsible_shard)
-	clerk := ck.subClerks[responsible_shard]
+	ck.mu.Lock()
+	config := ck.sck.Query()
+	gid := config.Shards[responsible_shard]
+	fmt.Printf("CLI issuing put %s to shard %d in group %d: %s %d\n", key, responsible_shard, gid, value, version)
+	_, servers, _ := config.GidServers(responsible_shard)
+	clerk := shardgrp.MakeClerk(ck.clnt, servers)
+	ck.mu.Unlock()
 
 	err := clerk.Put(key, value, version)
 
 	num_tries := 1 // tbh only try like 50 times max
 	for err == rpc.ErrWrongGroup {
 		fmt.Printf("wrong group %d, retrying put...\n", responsible_shard)
-		// oops, remake config
-		ck.addClerkForShard(responsible_shard) // update clerk
-		clerk = ck.subClerks[responsible_shard]
+
+		ck.mu.Lock()
+		current_config := ck.sck.Query()
+		_, servers, _ := current_config.GidServers(responsible_shard)
+		clerk = shardgrp.MakeClerk(ck.clnt, servers)
+		ck.mu.Unlock()
 
 		err = clerk.Put(key, value, version)
 		num_tries += 1
@@ -113,7 +120,15 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		if num_tries > 50 {
 			break
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	return err
+	// fmt.Printf("CLI returning %s\n", err)
+
+	if err == rpc.ErrVersion && num_tries > 1 {
+		return rpc.ErrMaybe
+	} else {
+		return err
+	}
 }

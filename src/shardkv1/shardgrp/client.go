@@ -31,7 +31,7 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// If the leader is wrong, cycle to the next one and try again
 	ok_failures := 0
 	for {
-		fmt.Printf("getting\n")
+		// fmt.Printf("getting\n")
 		args := rpc.GetArgs{Key: key}
 		reply := rpc.GetReply{}
 		leader := ck.leader
@@ -72,13 +72,12 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// otherwise, keep attempting to submit again (to different leaders)
 	ok_failures := 0
 	for {
-		fmt.Printf("putting\n")
+		// fmt.Printf("putting\n")
 		ck.mu.Lock()
 		if ck.leader == leader {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
 		}
 		ck.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
 
 		args := rpc.PutArgs{Key: key, Value: value, Version: version}
 		reply := rpc.PutReply{}
@@ -98,6 +97,8 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		if ok_failures > 50 {
 			return rpc.ErrWrongGroup
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -107,40 +108,42 @@ func (ck *Clerk) FreezeShard(s shardcfg.Tshid, num shardcfg.Tnum) ([]byte, rpc.E
 
 	ok_failures := 0
 	for {
-		fmt.Printf("freezing\n")
+		// fmt.Printf("freezing\n")
 		args := shardrpc.FreezeShardArgs{Shard: s, Num: num}
 		reply := shardrpc.FreezeShardReply{}
+		ck.mu.Lock()
 		leader := ck.leader
+		ck.mu.Unlock()
+
 		ok := ck.clnt.Call(ck.servers[leader], "KVServer.FreezeShard", &args, &reply)
 
-		ck.mu.Lock()
 		if ok {
 			if reply.Err == rpc.ErrWrongLeader {
+				ck.mu.Lock()
 				ck.leader = (ck.leader + 1) % len(ck.servers) // leader wrong, keep cycling
-			} else if reply.Err == rpc.ErrVersion {
 				ck.mu.Unlock()
+			} else if reply.Err == rpc.ErrVersion {
 				return make([]byte, 0), rpc.ErrVersion // config out of date
 			} else if reply.Err == rpc.ErrWrongGroup { // wrong group altogether
-				ck.mu.Unlock()
 				return make([]byte, 0), rpc.ErrWrongGroup
 			} else {
 				// we're good, return the frozen bytes
-				ck.mu.Unlock()
 				return reply.State, rpc.OK
 			}
 		} else {
+			ck.mu.Lock()
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			ck.mu.Unlock()
 		}
 
 		if !ok {
 			ok_failures += 1
 		}
 		if ok_failures > 50 {
-			ck.mu.Unlock()
 			return make([]byte, 0), rpc.ErrWrongGroup
-		} else {
-			ck.mu.Unlock()
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -148,32 +151,37 @@ func (ck *Clerk) InstallShard(s shardcfg.Tshid, state []byte, num shardcfg.Tnum)
 	fmt.Printf("\tissuing install shard request for shard %d config %d\n", s, num)
 	ok_failures := 0
 	for {
-		fmt.Printf("installing\n")
+		// fmt.Printf("installing\n")
 		args := shardrpc.InstallShardArgs{Shard: s, State: state, Num: num}
 		reply := shardrpc.InstallShardReply{}
+		ck.mu.Lock()
 		leader := ck.leader
+		ck.mu.Unlock()
+
 		ok := ck.clnt.Call(ck.servers[leader], "KVServer.InstallShard", &args, &reply)
 
-		ck.mu.Lock()
 		if ok {
 			if reply.Err == rpc.ErrWrongLeader {
+				ck.mu.Lock()
 				ck.leader = (ck.leader + 1) % len(ck.servers) // leader wrong, keep cycling
+				ck.mu.Unlock()
 			} else {
 				return reply.Err // return whatever happened
 			}
 		} else {
+			ck.mu.Lock()
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			ck.mu.Unlock()
 		}
 
 		if !ok {
 			ok_failures += 1
 		}
 		if ok_failures > 50 {
-			ck.mu.Unlock()
 			return rpc.ErrWrongGroup
-		} else {
-			ck.mu.Unlock()
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -182,31 +190,35 @@ func (ck *Clerk) DeleteShard(s shardcfg.Tshid, num shardcfg.Tnum) rpc.Err {
 
 	ok_failures := 0
 	for {
-		fmt.Printf("deleting\n")
+		// fmt.Printf("deleting\n")
 		args := shardrpc.DeleteShardArgs{Shard: s, Num: num}
 		reply := shardrpc.DeleteShardReply{}
+		ck.mu.Lock()
 		leader := ck.leader
+		ck.mu.Unlock()
 		ok := ck.clnt.Call(ck.servers[leader], "KVServer.DeleteShard", &args, &reply)
 
-		ck.mu.Lock()
 		if ok {
 			if reply.Err == rpc.ErrWrongLeader {
+				ck.mu.Lock()
 				ck.leader = (ck.leader + 1) % len(ck.servers) // leader wrong, keep cycling
+				ck.mu.Unlock()
 			} else {
 				return reply.Err // return whatever happened
 			}
 		} else {
+			ck.mu.Lock()
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			ck.mu.Unlock()
 		}
 
 		if !ok {
 			ok_failures += 1
 		}
 		if ok_failures > 50 {
-			ck.mu.Unlock()
 			return rpc.ErrWrongGroup
-		} else {
-			ck.mu.Unlock()
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
 }
