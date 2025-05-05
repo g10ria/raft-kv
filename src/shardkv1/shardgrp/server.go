@@ -94,9 +94,9 @@ func (kv *KVServer) DoOp(req any) any {
 	case shardrpc.FreezeShardArgs:
 		if args.Num < kv.shard_config_nums[args.Shard] {
 			fmt.Printf("\t\tgrp%d freeze shard %d (rejecting old)\n", kv.gid, args.Shard)
-			return rpc.ErrVersion
+			return shardrpc.FreezeShardReply{Err: rpc.ErrVersion}
 		} else {
-			fmt.Printf("\tgrp%d freeze shard %d\n", kv.gid, args.Shard)
+			// fmt.Printf("\tgrp%d freeze shard %d\n", kv.gid, args.Shard)
 		}
 
 		// make it so that you can only freeze shards if they're currently in shards
@@ -114,14 +114,17 @@ func (kv *KVServer) DoOp(req any) any {
 		w := new(bytes.Buffer)
 		e := labgob.NewEncoder(w)
 		e.Encode(kv.values[args.Shard])
+
+		fmt.Printf("\t\tgrp%d froze shard %d values: %v\n", kv.gid, args.Shard, kv.values[args.Shard])
+
 		// fmt.Printf("grp%d shards: %v\n", kv.gid, kv.shards)
 		return shardrpc.FreezeShardReply{State: w.Bytes(), Num: args.Num, Err: rpc.OK}
 
 	case shardrpc.InstallShardArgs:
-		fmt.Printf("\t\tgrp%d received install shard %d\n", kv.gid, args.Shard)
+		// fmt.Printf("\t\tgrp%d received install shard %d\n", kv.gid, args.Shard)
 		if args.Num < kv.shard_config_nums[args.Shard] {
 			fmt.Printf("\t\tgrp%d install shard %d (rejecting old) %v\n", kv.gid, args.Shard, kv.shards)
-			return rpc.ErrVersion
+			return shardrpc.InstallShardReply{Err: rpc.ErrVersion}
 		}
 
 		kv.shard_config_nums[args.Shard] = args.Num
@@ -142,12 +145,13 @@ func (kv *KVServer) DoOp(req any) any {
 				kv.values[args.Shard] = values
 			}
 		}
-		fmt.Printf("\tgrp%d install shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
+		fmt.Printf("\tgrp%d installed shard %d -> %v\n", kv.gid, args.Shard, kv.shards)
+		fmt.Printf("\t\tgrp%d installed shard %d values: %v\n", kv.gid, args.Shard, kv.values[args.Shard])
 		return shardrpc.InstallShardReply{Err: rpc.OK}
 	case shardrpc.DeleteShardArgs:
 		if args.Num < kv.shard_config_nums[args.Shard] {
 			fmt.Printf("\t\tgrp%d delete shard %d (rejecting old) %v\n", kv.gid, args.Shard, kv.shards)
-			return rpc.ErrVersion
+			return shardrpc.DeleteShardReply{Err: rpc.ErrVersion}
 		}
 
 		kv.shard_config_nums[args.Shard] = args.Num
@@ -244,6 +248,7 @@ func (kv *KVServer) FreezeShard(args *shardrpc.FreezeShardArgs, reply *shardrpc.
 	if err == rpc.ErrWrongLeader {
 		reply.Err = rpc.ErrWrongLeader
 	} else {
+		fmt.Printf("\t\twhat %s\n", rsm_reply)
 		rsm_reply_cast := rsm_reply.(shardrpc.FreezeShardReply)
 		reply.Err = rsm_reply_cast.Err
 		reply.State = rsm_reply_cast.State
@@ -257,6 +262,7 @@ func (kv *KVServer) InstallShard(args *shardrpc.InstallShardArgs, reply *shardrp
 	if err == rpc.ErrWrongLeader {
 		reply.Err = rpc.ErrWrongLeader
 	} else {
+		fmt.Printf("\t\twhat %s\n", rsm_reply)
 		rsm_reply_cast := rsm_reply.(shardrpc.InstallShardReply)
 		reply.Err = rsm_reply_cast.Err
 	}
@@ -268,6 +274,7 @@ func (kv *KVServer) DeleteShard(args *shardrpc.DeleteShardArgs, reply *shardrpc.
 	if err == rpc.ErrWrongLeader {
 		reply.Err = rpc.ErrWrongLeader
 	} else {
+		fmt.Printf("\t\twhat %s %s\n", err, rsm_reply)
 		rsm_reply_cast := rsm_reply.(shardrpc.DeleteShardReply)
 		reply.Err = rsm_reply_cast.Err
 	}

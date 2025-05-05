@@ -21,9 +21,13 @@ type ShardCtrler struct {
 	clnt *tester.Clnt
 	kvtest.IKVClerk
 
+	id string
+
 	killed   int32 // set by Kill()
 	key      string
 	next_key string
+
+	next_key_ID string
 
 	clerks map[tester.Tgid]*shardgrp.Clerk
 
@@ -38,6 +42,9 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 	sck.key = "CONFIG"
 	sck.next_key = "NEXT_CONFIG"
 	sck.clerks = make(map[tester.Tgid]*shardgrp.Clerk)
+
+	sck.id = kvtest.RandValue(8) // generate random ID string
+
 	return sck
 }
 
@@ -45,8 +52,8 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
-	// init
-	fmt.Printf("\ninit new controller\n")
+	fmt.Printf("\nNEW CONTROLLER [%s] init\n", sck.id)
+
 	curr_config, _, _ := sck.IKVClerk.Get(sck.key)
 	next_config, _, next_err := sck.IKVClerk.Get(sck.next_key)
 
@@ -57,8 +64,9 @@ func (sck *ShardCtrler) InitController() {
 		next := shardcfg.FromString(next_config)
 
 		if next.Num > curr.Num {
-			fmt.Printf("new controller init, continuing interrupted config %d\n", next.Num)
-			sck.ChangeConfigTo(next)
+			fmt.Printf("controller [%s] continuing interrupted config %d\n", sck.id, next.Num)
+			// sck.ChangeConfigTo(next)
+			sck.ChangeConfigToHelper(next, false) // should always try
 		}
 	}
 }
@@ -73,6 +81,8 @@ func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 	sck.IKVClerk.Put(sck.key, shardConfigString, rpc.Tversion(cfg.Num-1))
 	sck.IKVClerk.Put(sck.next_key, shardConfigString, rpc.Tversion(cfg.Num-1))
 
+	sck.IKVClerk.Put(sck.next_key_ID, sck.id, rpc.Tversion(cfg.Num-1))
+
 	fmt.Printf("put %s\n", shardConfigString)
 }
 
@@ -82,18 +92,49 @@ type ShardMove struct {
 	to    tester.Tgid
 }
 
+func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
+	sck.ChangeConfigToHelper(new, true)
+}
+
 // Called by the tester to ask the controller to change the
 // configuration from the current one to new.  While the controller
 // changes the configuration it may be superseded by another
 // controller.
-func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
-	fmt.Printf("\nstarted updating config to %d\n", new.Num)
-
+func (sck *ShardCtrler) ChangeConfigToHelper(new *shardcfg.ShardConfig, check_for_concurrent_controllers bool) {
 	sck.mu.Lock()
 	defer sck.mu.Unlock()
 
 	nextConfigString := new.String()
-	sck.IKVClerk.Put(sck.next_key, nextConfigString, rpc.Tversion(new.Num-1))
+
+	if check_for_concurrent_controllers {
+		curr_config, _, _ := sck.IKVClerk.Get(sck.key)
+		next_config, _, _ := sck.IKVClerk.Get(sck.next_key)
+		curr := shardcfg.FromString(curr_config)
+		next := shardcfg.FromString(next_config)
+		if curr.Num == next.Num {
+			// nothing in progress so we're good
+		} else {
+			// check ID? check if it's equal (i mean it never should be)
+
+			next_doer_id, _, _ := sck.IKVClerk.Get(sck.next_key_ID)
+			if next_doer_id != sck.id {
+
+				fmt.Printf("controller [%s] is too slow, returning\n", sck.id)
+				return // do nothing
+			}
+		}
+
+		// check if put was successful; someone might have beaten them to it in the meantime
+		put_err := sck.IKVClerk.Put(sck.next_key, nextConfigString, rpc.Tversion(new.Num-1))
+		sck.IKVClerk.Put(sck.next_key_ID, sck.id, rpc.Tversion(new.Num-1))
+
+		if put_err != rpc.OK {
+			fmt.Printf("controller [%s] is too slow LATER, returning\n", sck.id)
+			return
+		}
+	}
+
+	fmt.Printf("\ncontroller [%s] started updating config to %d: %s\n", sck.id, new.Num, nextConfigString)
 
 	old := sck.Query()
 	shardMoves := make([]ShardMove, 0) // store all of the shard moves
@@ -111,7 +152,7 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 
 	// using cached clerks
 	for _, move := range shardMoves {
-		fmt.Printf("EXECUTING SHARDMOVE shard %d from grp%d to grp%d\n", move.tshid, move.from, move.to)
+		fmt.Printf("CONTROLLER [%s] EXECUTING SHARDMOVE shard %d from grp%d to grp%d\n", sck.id, move.tshid, move.from, move.to)
 		from := move.from
 		to := move.to
 
@@ -138,7 +179,7 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 		}
 	}
 
-	fmt.Printf("\nfinished updating config to %d: %s\n", new.Num, nextConfigString)
+	fmt.Printf("\nCONTROLLER [%s] finished updating config to %d: %s\n", sck.id, new.Num, nextConfigString)
 
 	sck.IKVClerk.Put(sck.key, nextConfigString, rpc.Tversion(new.Num-1))
 }
