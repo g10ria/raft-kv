@@ -159,7 +159,6 @@ func (sck *ShardCtrler) ChangeConfigToHelper(new *shardcfg.ShardConfig, check_fo
 		from_clerk := sck.MakeOptionalAndGetClerk(from)
 		to_clerk := shardgrp.MakeClerk(sck.clnt, new.Groups[to])
 
-		// possible todo: handle errors here properly
 		state, err := from_clerk.FreezeShard(move.tshid, new.Num)
 		for err == rpc.ErrWrongGroup { // if this is the wrong group, re-query the config and change again
 			// from_clerk = sck.MakeRequiredAndGetClerk(from)
