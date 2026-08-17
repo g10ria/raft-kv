@@ -2,7 +2,7 @@
 
 A distributed key/value storage service written from scratch in Go, built on a full implementation of the [Raft](https://raft.github.io/) consensus algorithm. The sharded service dynamically rebalances data across
 independent Raft groups, accounting for crash recovery, network partitions, message loss/reordering, 
-and concurrent clients.
+and concurrent clients. Written for Distributed Systems (spring 2025).
 
 ## Components
 
@@ -18,4 +18,4 @@ changes in that configuration without losing writes or serving stale reads mid-m
 
 ## Testing
 
-The folders `simulated-rpc/` and `testers/` contain files for simulating KV clients making requests across an unreliable network (dropped/delayed/reordered messages, partitions), testing the service's correctness, linearizability, and robustness.
+The folders `simulated-rpc/` and `testers/` contain course-provided files for simulating KV clients making requests across an unreliable network (dropped/delayed/reordered messages, partitions), testing the service's correctness, linearizability, and robustness.
