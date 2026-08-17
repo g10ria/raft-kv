@@ -1,0 +1,83 @@
+package kvsrv
+
+import (
+	"time"
+
+	"raft-kv/simulated-rpc/rpc"
+	kvtest "raft-kv/testers/kvtest"
+	tester "raft-kv/testers/testkit"
+)
+
+type Clerk struct {
+	clnt   *tester.Clnt
+	server string
+}
+
+func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
+	ck := &Clerk{clnt: clnt, server: server}
+	return ck
+}
+
+// Get fetches the current value and version for a key.  It returns
+// ErrNoKey if the key does not exist. It keeps trying forever in the
+// face of all other errors.
+func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
+	rpc.LogDebugf("Clerk calling Get(%s)", key)
+
+	args := rpc.GetArgs{}
+	args.Key = key
+	reply := rpc.GetReply{}
+	ok := ck.clnt.Call(ck.server, "KVServer.Get", &args, &reply)
+
+	for !ok || reply.Err != rpc.OK {
+		if reply.Err == rpc.ErrNoKey {
+			return "", 0, rpc.ErrNoKey
+		}
+		time.Sleep(100 * time.Millisecond)
+		ok = ck.clnt.Call(ck.server, "KVServer.Get", &args, &reply)
+	}
+
+	return reply.Value, reply.Version, rpc.OK
+}
+
+// Put updates key with value only if the version in the
+// request matches the version of the key at the server.  If the
+// versions numbers don't match, the server should return
+// ErrVersion.  If Put receives an ErrVersion on its first RPC, Put
+// should return ErrVersion, since the Put was definitely not
+// performed at the server. If the server returns ErrVersion on a
+// resend RPC, then Put must return ErrMaybe to the application, since
+// its earlier RPC might have been processed by the server successfully
+// but the response was lost, and the the Clerk doesn't know if
+// the Put was performed or not.
+//
+func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
+	rpc.LogDebugf("Clerk calling Put(%s, %s)", key, value)
+
+	args := rpc.PutArgs{}
+	args.Key = key
+	args.Value = value
+	args.Version = version
+	reply := rpc.PutReply{}
+	ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+
+	if reply.Err == rpc.ErrVersion {
+		// Put was definitely not performed
+		return rpc.ErrVersion
+	}
+
+	// Keep resending until a response is received
+	for !ok || reply.Err != rpc.OK {
+		if reply.Err == rpc.ErrVersion {
+			return rpc.ErrMaybe
+		} else if reply.Err == rpc.ErrNoKey {
+			return rpc.ErrNoKey
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		ok = ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+	}
+
+	// Assume ok now
+	return rpc.OK
+}
